@@ -1,0 +1,13 @@
+# IDE files
+.idea/
+.vscode/
+.vs/
+
+# build files
+.zig-cache/
+zig-cache/
+zig-out/
+build/
+build-*/
+docgen_tmp/
+.zbscanhelper.zig
