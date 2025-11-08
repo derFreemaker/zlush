@@ -44,9 +44,9 @@ const zlush_main = struct {
     const Self = @This();
 
     input_canceled: std.atomic.Value(bool) = .init(false),
-    
+
     allocator: std.mem.Allocator,
-    
+
     stdin_buf: []u8,
     stdin: std.fs.File.Reader,
 
@@ -113,30 +113,58 @@ const zlush_main = struct {
             return command;
         }
     }
-    
+
+    fn hasStdinData(timeout_ms: i32) !bool {
+        if (builtin.os.tag == .windows) {
+            const windows = std.os.windows;
+            const stdin_handle = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+
+            const timeout: u32 = if (timeout_ms < 0) windows.INFINITE else @intCast(timeout_ms);
+
+            windows.WaitForSingleObject(stdin_handle, timeout) catch |err| switch (err) {
+                error.WaitTimeOut => return false,
+                else => return error.WaitFailed,
+            };
+
+            return true;
+        } else {
+            const posix = std.posix;
+            var pollfds = [_]posix.pollfd{.{
+                .fd = posix.STDIN_FILENO,
+                .events = posix.POLL.IN,
+                .revents = 0,
+            }};
+
+            const ready = try posix.poll(&pollfds, timeout_ms);
+
+            return ready > 0 and (pollfds[0].revents & posix.POLL.IN) != 0;
+        }
+    }
+
     pub fn readCommand(self: *Self) error{ ReadingCommandFailed, EndOfStream, OutOfMemory, CommandCanceled }![]const u8 {
         self.input_canceled.store(false, .seq_cst);
 
         var command_writer = try std.Io.Writer.Allocating.initCapacity(self.allocator, 256);
         defer command_writer.deinit();
 
-        read_byte: while (true) {
+        while (true) {
             if (self.input_canceled.load(.seq_cst)) {
                 return error.CommandCanceled;
             }
 
-            const byte = self.stdin.interface.peekByte() catch |err| switch (err) {
-                error.ReadFailed => return error.ReadingCommandFailed,
-                error.EndOfStream => {
-                    continue :read_byte;
-                },
-            };
-            self.stdin.interface.toss(1);
-            
-            if (byte == '\n') {
-                break;
+            const has_data = hasStdinData(30) catch unreachable;
+
+            if (has_data) {
+                const byte = self.stdin.interface.takeByte() catch |err| switch (err) {
+                    error.EndOfStream => continue,
+                    else => return error.ReadingCommandFailed,
+                };
+
+                if (byte == '\n') {
+                    break;
+                }
+                command_writer.writer.writeByte(byte) catch return error.ReadingCommandFailed;
             }
-            command_writer.writer.writeByte(byte) catch return error.ReadingCommandFailed;
         }
 
         const command_buf = command_writer.written();
