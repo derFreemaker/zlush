@@ -1,49 +1,53 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const Signal = @import("signal.zig");
+
 // const zlush = @import("zlush");
 
-var state: zlush_main = undefined;
-
 pub fn main() !u8 {
-    var gpa = std.heap.DebugAllocator(if (builtin.mode == .Debug) .{
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
+
+    var gpa = if (builtin.mode == .Debug) std.heap.DebugAllocator(.{
         .retain_metadata = true,
         .never_unmap = true,
-    } else .{}){};
-    const allocator = gpa.allocator();
+    }){
+        .backing_allocator = arena_allocator.allocator(),
+    } else void{};
+    defer if (builtin.mode == .Debug) if (gpa.deinit() == .leak) @panic("leaks detected");
+    const allocator = if (builtin.mode == .Debug) gpa.allocator() else arena_allocator.allocator();
 
-    state = try zlush_main.init(allocator);
+    var state = try zlush_main.init(allocator);
     defer state.deinit();
 
     while (true) {
-        const command = try state.promptUser();
+        defer state.stdout.interface.flush() catch @panic("unable to flush");
+
+        const command = try state.promptUser(allocator);
         defer allocator.free(command);
 
         if (std.mem.eql(u8, command, "exit")) {
             return 0;
         }
 
+        if (std.mem.eql(u8, command, "clear")) {
+            try state.stdout.interface.writeAll("\x1b[H\x1b[2J");
+            continue;
+        }
+
+        if (std.mem.eql(u8, command, "clear --scrollback")) {
+            try state.stdout.interface.writeAll("\x1b[3J\x1b[H\x1b[2J");
+            continue;
+        }
+
         try state.stdout.interface.writeAll(command);
         try state.stdout.interface.writeByte('\n');
-        try state.stdout.interface.flush();
     }
-}
-
-fn handleSignal(sig: c_int) callconv(.c) void {
-    _ = sig;
-    state.input_canceled.store(true, .seq_cst);
-}
-
-fn handleConsoleCtrl(dwCtrlType: u32) callconv(.c) i32 {
-    _ = dwCtrlType;
-    state.input_canceled.store(true, .seq_cst);
-    return 1;
 }
 
 const zlush_main = struct {
     const Self = @This();
-
-    input_canceled: std.atomic.Value(bool) = .init(false),
 
     allocator: std.mem.Allocator,
 
@@ -57,21 +61,8 @@ const zlush_main = struct {
     stderr: std.fs.File.Writer,
 
     pub fn init(allocator: std.mem.Allocator) error{ FailedToSetHandler, OutOfMemory }!Self {
-        // Setup signal handlers
-        if (builtin.os.tag == .windows) {
-            if (std.os.windows.kernel32.SetConsoleCtrlHandler(handleConsoleCtrl, 1) == 0) {
-                return error.FailedToSetHandler;
-            }
-        } else {
-            const posix = std.posix;
-            var act = posix.Sigaction{
-                .handler = .{ .handler = handleSignal },
-                .mask = posix.empty_sigset,
-                .flags = 0,
-            };
-            posix.sigaction(posix.SIG.INT, &act, null);
-        }
-
+        try Signal.initSigHandler();
+        
         const stdin_buf = try allocator.alloc(u8, 256);
         const stdout_buf = try allocator.alloc(u8, 1024);
         const stderr_buf = try allocator.alloc(u8, 1024);
@@ -96,12 +87,12 @@ const zlush_main = struct {
         self.allocator.free(self.stderr_buf);
     }
 
-    pub fn promptUser(self: *Self) ![]const u8 {
+    pub fn promptUser(self: *Self, allocator: std.mem.Allocator) ![]const u8 {
         while (true) {
             try self.stdout.interface.writeAll("zlush> ");
             try self.stdout.interface.flush();
 
-            const command = self.readCommand() catch |err| switch (err) {
+            const command = self.readCommand(allocator) catch |err| switch (err) {
                 error.CommandCanceled => {
                     try self.stdout.interface.writeAll("^C\n");
                     try self.stdout.interface.flush();
@@ -141,14 +132,14 @@ const zlush_main = struct {
         }
     }
 
-    pub fn readCommand(self: *Self) error{ ReadingCommandFailed, EndOfStream, OutOfMemory, CommandCanceled }![]const u8 {
-        self.input_canceled.store(false, .seq_cst);
+    pub fn readCommand(self: *Self, allocator: std.mem.Allocator) error{ ReadingCommandFailed, EndOfStream, OutOfMemory, CommandCanceled }![]const u8 {
+        Signal.reset(.INTERRUPT);
 
         var command_writer = try std.Io.Writer.Allocating.initCapacity(self.allocator, 256);
         defer command_writer.deinit();
 
         while (true) {
-            if (self.input_canceled.load(.seq_cst)) {
+            if (Signal.found(.INTERRUPT)) {
                 return error.CommandCanceled;
             }
 
@@ -169,6 +160,6 @@ const zlush_main = struct {
 
         const command_buf = command_writer.written();
         const command = if (std.mem.endsWith(u8, command_buf, "\r")) command_buf[0 .. command_writer.written().len - 1] else command_buf;
-        return try self.allocator.dupe(u8, command);
+        return try allocator.dupe(u8, command);
     }
 };
