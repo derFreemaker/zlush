@@ -58,7 +58,7 @@ pub fn reset(sig: Signal) void {
     sigs.remove(sig);
 }
 
-pub fn found(sig: Signal) bool {
+pub fn recieved(sig: Signal) bool {
     sig_mutex.lock();
     defer sig_mutex.unlock();
 

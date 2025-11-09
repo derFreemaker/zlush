@@ -121,7 +121,7 @@ const ZlushInteractive = struct {
         defer command_writer.deinit();
 
         while (true) {
-            if (Signal.found(.INTERRUPT)) {
+            if (Signal.recieved(.INTERRUPT)) {
                 return error.CommandCanceled;
             }
 
