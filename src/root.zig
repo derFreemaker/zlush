@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const zlush = struct {
-    const Self = @This();
-    
-    
-};
+const Zlush = @This();
+
+// pub fn execute(command: []const u8) u32 {
+// 
+// }

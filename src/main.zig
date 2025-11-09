@@ -2,8 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Signal = @import("signal.zig");
+const Ansi = @import("utils/ansi.zig");
 
-// const zlush = @import("zlush");
+const Zlush = @import("zlush");
 
 pub fn main() !u8 {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -18,35 +19,12 @@ pub fn main() !u8 {
     defer if (builtin.mode == .Debug) if (gpa.deinit() == .leak) @panic("leaks detected");
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else arena_allocator.allocator();
 
-    var state = try zlush_main.init(allocator);
-    defer state.deinit();
-
-    while (true) {
-        defer state.stdout.interface.flush() catch @panic("unable to flush");
-
-        const command = try state.promptUser(allocator);
-        defer allocator.free(command);
-
-        if (std.mem.eql(u8, command, "exit")) {
-            return 0;
-        }
-
-        if (std.mem.eql(u8, command, "clear")) {
-            try state.stdout.interface.writeAll("\x1b[H\x1b[2J");
-            continue;
-        }
-
-        if (std.mem.eql(u8, command, "clear --scrollback")) {
-            try state.stdout.interface.writeAll("\x1b[3J\x1b[H\x1b[2J");
-            continue;
-        }
-
-        try state.stdout.interface.writeAll(command);
-        try state.stdout.interface.writeByte('\n');
-    }
+    var interactive = try ZlushInteractive.init(allocator);
+    defer interactive.deinit();
+    return interactive.loop();
 }
 
-const zlush_main = struct {
+const ZlushInteractive = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
@@ -62,7 +40,7 @@ const zlush_main = struct {
 
     pub fn init(allocator: std.mem.Allocator) error{ FailedToSetHandler, OutOfMemory }!Self {
         try Signal.initSigHandler();
-        
+
         const stdin_buf = try allocator.alloc(u8, 256);
         const stdout_buf = try allocator.alloc(u8, 1024);
         const stderr_buf = try allocator.alloc(u8, 1024);
@@ -87,6 +65,32 @@ const zlush_main = struct {
         self.allocator.free(self.stderr_buf);
     }
 
+    pub fn loop(self: *Self) !u8 {
+        while (true) {
+            defer self.stdout.interface.flush() catch @panic("unable to flush");
+
+            const command = try self.promptUser(self.allocator);
+            defer self.allocator.free(command);
+
+            if (std.mem.eql(u8, command, "exit")) {
+                return 0;
+            }
+
+            if (std.mem.eql(u8, command, "clear")) {
+                try self.stdout.interface.writeAll("\x1b[H\x1b[2J");
+                continue;
+            }
+
+            if (std.mem.eql(u8, command, "clear --scrollback")) {
+                try self.stdout.interface.writeAll("\x1b[3J\x1b[H\x1b[2J");
+                continue;
+            }
+
+            try self.stdout.interface.writeAll(command);
+            try self.stdout.interface.writeByte('\n');
+        }
+    }
+    
     pub fn promptUser(self: *Self, allocator: std.mem.Allocator) ![]const u8 {
         while (true) {
             try self.stdout.interface.writeAll("zlush> ");
@@ -94,7 +98,12 @@ const zlush_main = struct {
 
             const command = self.readCommand(allocator) catch |err| switch (err) {
                 error.CommandCanceled => {
-                    try self.stdout.interface.writeAll("^C\n");
+                    try self.stdout.interface.print("{f}^C{s}\n", .{
+                        Ansi.Coloring{
+                            .foreground = .normal(.bright_red),
+                        },
+                        comptime Ansi.reset(),
+                    });
                     try self.stdout.interface.flush();
                     continue;
                 },
@@ -102,33 +111,6 @@ const zlush_main = struct {
             };
 
             return command;
-        }
-    }
-
-    fn hasStdinData(timeout_ms: i32) !bool {
-        if (builtin.os.tag == .windows) {
-            const windows = std.os.windows;
-            const stdin_handle = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
-
-            const timeout: u32 = if (timeout_ms < 0) windows.INFINITE else @intCast(timeout_ms);
-
-            windows.WaitForSingleObject(stdin_handle, timeout) catch |err| switch (err) {
-                error.WaitTimeOut => return false,
-                else => return error.WaitFailed,
-            };
-
-            return true;
-        } else {
-            const posix = std.posix;
-            var pollfds = [_]posix.pollfd{.{
-                .fd = posix.STDIN_FILENO,
-                .events = posix.POLL.IN,
-                .revents = 0,
-            }};
-
-            const ready = try posix.poll(&pollfds, timeout_ms);
-
-            return ready > 0 and (pollfds[0].revents & posix.POLL.IN) != 0;
         }
     }
 
@@ -161,5 +143,32 @@ const zlush_main = struct {
         const command_buf = command_writer.written();
         const command = if (std.mem.endsWith(u8, command_buf, "\r")) command_buf[0 .. command_writer.written().len - 1] else command_buf;
         return try allocator.dupe(u8, command);
+    }
+
+    fn hasStdinData(timeout_ms: i32) !bool {
+        if (builtin.os.tag == .windows) {
+            const windows = std.os.windows;
+            const stdin_handle = try windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+
+            const timeout: u32 = if (timeout_ms < 0) windows.INFINITE else @intCast(timeout_ms);
+
+            windows.WaitForSingleObject(stdin_handle, timeout) catch |err| switch (err) {
+                error.WaitTimeOut => return false,
+                else => return error.WaitFailed,
+            };
+
+            return true;
+        } else {
+            const posix = std.posix;
+            var pollfds = [_]posix.pollfd{.{
+                .fd = posix.STDIN_FILENO,
+                .events = posix.POLL.IN,
+                .revents = 0,
+            }};
+
+            const ready = try posix.poll(&pollfds, timeout_ms);
+
+            return ready > 0 and (pollfds[0].revents & posix.POLL.IN) != 0;
+        }
     }
 };
