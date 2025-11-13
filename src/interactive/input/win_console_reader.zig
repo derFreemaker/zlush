@@ -168,6 +168,8 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
     unreachable;
 }
 
+//TODO: instead of reading one event read like 10 or 20 at once
+
 fn peekEvent(self: *WinConsoleReader) error{ ReadFailed }!c.InputRecord {
     while (self.event == null) {
         if (readNextEvent() catch return error.ReadFailed) |event| {
