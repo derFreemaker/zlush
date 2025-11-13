@@ -44,7 +44,7 @@ pub fn initSigHandler() error{FailedToSetHandler}!void {
     } else {
         var act = posix.Sigaction{
             .handler = .{ .handler = handleSignal },
-            .mask = 0,
+            .mask = [_]c_ulong{ 0 },
             .flags = 0,
         };
         posix.sigaction(posix.SIG.INT, &act, null);
