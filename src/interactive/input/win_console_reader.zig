@@ -7,22 +7,23 @@ const InputToken = @import("input_token.zig").InputToken;
 
 const WinConsoleReader = @This();
 
-event_buffer: std.ArrayListUnmanaged(c.InputRecord),
+event: ?c.InputRecord,
 
 pub fn init(allocator: std.mem.Allocator) WinConsoleReader {
     _ = allocator;
 
     return WinConsoleReader{
-        .event_buffer = .empty,
+        .event = null,
     };
 }
 
 pub fn deinit(self: *WinConsoleReader, allocator: std.mem.Allocator) void {
-    self.event_buffer.deinit(allocator);
+    _ = self;
+    _ = allocator;
 }
 
 pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ OutOfMemory, ReadFailed }!InputToken {
-    const event = try self.peekEvent(allocator);
+    const event = try self.peekEvent();
 
     switch (event) {
         .key => |key_event| {
@@ -167,19 +168,19 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
     unreachable;
 }
 
-fn peekEvent(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ OutOfMemory, ReadFailed }!c.InputRecord {
-    while (self.event_buffer.items.len == 0) {
+fn peekEvent(self: *WinConsoleReader) error{ ReadFailed }!c.InputRecord {
+    while (self.event == null) {
         if (readNextEvent() catch return error.ReadFailed) |event| {
-            try self.event_buffer.append(allocator, event);
+            self.event = event;
             return event;
         }
     }
 
-    return self.event_buffer.items[0];
+    return self.event.?;
 }
 
 fn tossEvent(self: *WinConsoleReader) void {
-    _ = self.event_buffer.orderedRemove(0);
+    self.event = null;
 }
 
 fn readNextEvent() error{Unexpected}!?c.InputRecord {
