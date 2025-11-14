@@ -44,6 +44,7 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                     32...126 => return InputToken{ .char = .{
                         .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
                         .len = 1,
+                        .dw = 1,
                     } },
 
                     127 => return .delete,
@@ -53,6 +54,7 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                         return InputToken{ .char = .{
                             .buf = buf,
                             .len = len,
+                            .dw = 1,
                         } };
                     },
 
@@ -64,7 +66,20 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                     0x30...0x39, 0x41...0x5a => continue, // ignore input event
 
                     0x00 => {
-                        std.debug.panic("help me: {any}\n", .{key_event});
+                        if (std.unicode.utf16IsHighSurrogate(key_event.uChar.UnicodeChar)) {
+                            const next_event = (try self.peekEvent()).key;
+                            self.tossEvent();
+                            
+                            const code_point = std.unicode.utf16DecodeSurrogatePair(&.{ key_event.uChar.UnicodeChar, next_event.uChar.UnicodeChar }) catch unreachable;
+
+                            var token = InputToken{ .char = undefined };
+                            token.char.len = std.unicode.utf8Encode(code_point, &token.char.buf) catch unreachable;
+                            token.char.dw = 2;
+                            
+                            return token;
+                        }
+
+                        @panic("not implemented");
                     },
 
                     0x09 => return .tab,
@@ -148,7 +163,7 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                     0xb3 => return .media_play_pause,
 
                     else => {
-                        std.debug.panic("unknown wVirtualKeyCode: 0x{x} unichar code: {d}", .{key_event.wVirtualKeyCode, key_event.uChar.UnicodeChar});
+                        std.debug.panic("unknown wVirtualKeyCode: 0x{x} unichar code: {d}", .{ key_event.wVirtualKeyCode, key_event.uChar.UnicodeChar });
                     },
                 }
             },

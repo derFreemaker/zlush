@@ -90,10 +90,26 @@ pub const InputToken = union(enum) {
     bell: void, // ctrl-g
     clearScreen: void, // ctrl-l
     form_feed: void,
+
+    pub fn deinit(self: *InputToken) void {
+        switch (self.*) {
+            .grapheme => |*g| g.deinit(),
+            else => {},
+        }
+    }
+    
+    pub fn dw(self: InputToken) i4 {
+        return switch (self) {
+            .char => |c| c.dw,
+            .grapheme => |g| g.dw,
+            else => 0,
+        };
+    }
     
     pub const Char = struct {
         buf: [4]u8,
         len: u3,
+        dw: i4,
 
         pub fn get(self: Char) []const u8 {
             return self.buf[0..self.len];
@@ -103,16 +119,10 @@ pub const InputToken = union(enum) {
     pub const Grapheme = struct {
         allocator: std.mem.Allocator,
         data: []const u8,
+        dw: i4,
 
         pub fn deinit(self: *Grapheme) void {
             self.allocator.free(self.data);
         }
     };
-
-    pub fn deinit(self: *InputToken) void {
-        switch (self.*) {
-            .grapheme => |*g| g.deinit(),
-            else => {},
-        }
-    }
 };
