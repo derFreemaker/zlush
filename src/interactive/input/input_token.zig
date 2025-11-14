@@ -8,6 +8,7 @@ pub const InputToken = union(enum) {
 
     backspace: void,
     tab: void,
+    vertical_tab: void,
     enter: void,
     pause: void,
     caps_lock: void,
@@ -86,7 +87,9 @@ pub const InputToken = union(enum) {
     
     interrupt: void, // ctrl-c
     EOF: void, // ctrl-d
+    bell: void, // ctrl-g
     clearScreen: void, // ctrl-l
+    form_feed: void,
     
     pub const Char = struct {
         buf: [4]u8,

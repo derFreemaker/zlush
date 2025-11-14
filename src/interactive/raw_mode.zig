@@ -31,8 +31,7 @@ fn enableWindows() !void {
     const output_raw_mode: win_c.CONSOLE_MODE_OUTPUT = .{
         .PROCESSED_OUTPUT = 1,
         .VIRTUAL_TERMINAL_PROCESSING = 1,
-        // .DISABLE_NEWLINE_AUTO_RETURN = 1,
-        .ENABLE_LVB_GRID_WORLDWIDE = 1,
+        // .ENABLE_LVB_GRID_WORLDWIDE = 1,
     };
 
     const windows = std.os.windows;
