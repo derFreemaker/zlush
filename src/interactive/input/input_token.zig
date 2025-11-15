@@ -3,7 +3,6 @@ const std = @import("std");
 pub const InputToken = union(enum) {
     invalid: void,
 
-    char: Char,
     grapheme: Grapheme,
 
     backspace: void,
@@ -27,7 +26,7 @@ pub const InputToken = union(enum) {
     delete: void,
     left_meta: void,
     right_meta: void,
-    
+
     kp_0: void,
     kp_1: void,
     kp_2: void,
@@ -44,7 +43,7 @@ pub const InputToken = union(enum) {
     kp_subtract: void,
     kp_decimal: void,
     kp_divide: void,
-    
+
     f1: void,
     f2: void,
     f3: void,
@@ -84,45 +83,51 @@ pub const InputToken = union(enum) {
     media_track_prev: void,
     media_stop: void,
     media_play_pause: void,
-    
+
     interrupt: void, // ctrl-c
     EOF: void, // ctrl-d
     bell: void, // ctrl-g
     clearScreen: void, // ctrl-l
     form_feed: void,
 
-    pub fn deinit(self: *InputToken) void {
-        switch (self.*) {
-            .grapheme => |*g| g.deinit(),
-            else => {},
+    pub const Grapheme = union(enum) {
+        single: Single,
+        cluster: Cluster,
+
+        pub inline fn get(self: Grapheme) []const u8 {
+            return switch (self) {
+                .single => |s| s.get(),
+                .cluster => |c| c.data,
+            };
         }
-    }
-    
-    pub fn dw(self: InputToken) i4 {
-        return switch (self) {
-            .char => |c| c.dw,
-            .grapheme => |g| g.dw,
-            else => 0,
+
+        pub inline fn lenBytes(self: Grapheme) usize {
+            return switch (self) {
+                .single => |s| s.len,
+                .cluster => |c| c.data.len,
+            };
+        }
+
+        pub inline fn dw(self: Grapheme) u3 {
+            return switch (self) {
+                .single => |s| s.dw,
+                .cluster => |c| c.dw,
+            };
+        }
+
+        pub const Single = struct {
+            buf: [4]u8,
+            len: u3,
+            dw: u3,
+
+            pub inline fn get(self: Single) []const u8 {
+                return self.buf[0..self.len];
+            }
         };
-    }
-    
-    pub const Char = struct {
-        buf: [4]u8,
-        len: u3,
-        dw: i4,
 
-        pub fn get(self: Char) []const u8 {
-            return self.buf[0..self.len];
-        }
-    };
-
-    pub const Grapheme = struct {
-        allocator: std.mem.Allocator,
-        data: []const u8,
-        dw: i4,
-
-        pub fn deinit(self: *Grapheme) void {
-            self.allocator.free(self.data);
-        }
+        pub const Cluster = struct {
+            data: []const u8,
+            dw: u3,
+        };
     };
 };

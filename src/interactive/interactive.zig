@@ -4,14 +4,11 @@ const builtin = @import("builtin");
 const AnsiColor = @import("../utils/ansi_color.zig");
 const RawMode = @import("raw_mode.zig");
 
-const InputToken = @import("input/input_token.zig").InputToken;
-const ConsoleReader = if (builtin.os.tag == .windows) @import("input/win_console_reader.zig") else @compileError("not implemented");
+const Prompt = @import("input/prompt.zig");
 
 const Interactive = @This();
 
 allocator: std.mem.Allocator,
-
-tokenizer: ConsoleReader,
 
 stdout_buf: []u8,
 stdout: std.fs.File.Writer,
@@ -28,8 +25,6 @@ pub fn init(allocator: std.mem.Allocator) error{ FailedToSetRawMode, OutOfMemory
     return Interactive{
         .allocator = allocator,
 
-        .tokenizer = ConsoleReader.init(allocator),
-
         .stdout_buf = stdout_buf,
         .stdout = std.fs.File.stdout().writer(stdout_buf),
 
@@ -42,8 +37,6 @@ pub fn deinit(self: *Interactive) void {
     self.allocator.free(self.stdout_buf);
     self.allocator.free(self.stderr_buf);
 
-    self.tokenizer.deinit(self.allocator);
-
     RawMode.disable();
 }
 
@@ -52,7 +45,7 @@ pub fn loop(self: *Interactive) !u8 {
         defer self.stdout.interface.flush() catch @panic("unable to flush");
 
         const command = self.promptUser(self.allocator) catch |err| switch (err) {
-            error.EndOfStream => return 0,
+            error.EndOfInput => return 0,
             else => |e| return e,
         };
         defer self.allocator.free(command);
@@ -76,7 +69,10 @@ pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) ![]const u8 
         try self.stdout.interface.writeAll("zlush> ");
         try self.stdout.interface.flush();
 
-        const command = self.readCommand(allocator) catch |err| switch (err) {
+        var prompt = Prompt.init(self.allocator, &self.stdout.interface);
+        defer prompt.deinit();
+        
+        const command = prompt.readCommand(allocator) catch |err| switch (err) {
             error.CommandCanceled => {
                 try self.stdout.interface.print("{f}^C{s}\n", .{
                     AnsiColor.Coloring{
@@ -97,137 +93,4 @@ pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) ![]const u8 
 
         return command;
     }
-}
-
-fn redraw(self: *Interactive, tokens: []const InputToken, cursor: u32, after_cursor: u32) !void {
-    self.stdout.interface.print("\x1b[{}D\x1b[0K", .{cursor}) catch return error.EchoingStateFailed;
-    for (tokens) |t| {
-        switch (t) {
-            .char => |c| {
-                self.stdout.interface.writeAll(c.get()) catch return error.EchoingStateFailed;
-            },
-            .space => {
-                self.stdout.interface.writeByte(' ') catch return error.EchoingStateFailed;
-            },
-            else => {},
-        }
-    }
-    const move_left = tokens.len - after_cursor;
-    if (move_left > 0) {
-        self.stdout.interface.print("\x1b[{}D", .{move_left}) catch return error.EchoingStateFailed;
-    }
-}
-
-pub fn readCommand(self: *Interactive, allocator: std.mem.Allocator) error{ ReadingCommandFailed, EndOfStream, OutOfMemory, CommandCanceled, CommandCanceledAndClear, EchoingStateFailed }![]const u8 {
-    var tokens: std.ArrayListUnmanaged(InputToken) = try .initCapacity(allocator, 256);
-    defer {
-        for (tokens.items) |*token| {
-            token.deinit();
-        }
-        tokens.deinit(allocator);
-    }
-    var cursor: u32 = 0;
-
-    while (true) {
-        const token = self.tokenizer.nextToken(allocator) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.ReadFailed => return error.ReadingCommandFailed,
-            // error.EndOfStream => return error.EndOfStream,
-        };
-        // std.debug.print("{any}\n", .{ token });
-
-        switch (token) {
-            .char => |c| {
-                try tokens.insert(allocator, cursor, token);
-                cursor += 1;
-
-                self.stdout.interface.writeAll(c.get()) catch return error.EchoingStateFailed;
-                if (tokens.items.len != cursor) {
-                    try self.redraw(tokens.items, cursor, cursor);
-                }
-                self.stdout.interface.flush() catch return error.EchoingStateFailed;
-            },
-            .space => {
-                try tokens.insert(allocator, cursor, token);
-                cursor += 1;
-
-                self.stdout.interface.writeByte(' ') catch return error.EchoingStateFailed;
-                if (tokens.items.len != cursor) {
-                    try self.redraw(tokens.items, cursor, cursor);
-                }
-                self.stdout.interface.flush() catch return error.EchoingStateFailed;
-            },
-            .enter => {
-                self.stdout.interface.writeByte('\n') catch return error.EchoingStateFailed;
-                self.stdout.interface.flush() catch return error.EchoingStateFailed;
-                break;
-            },
-
-            .backspace => {
-                if (cursor == 0) {
-                    continue;
-                }
-
-                cursor -= 1;
-                var removed_token = tokens.orderedRemove(cursor);
-                removed_token.deinit();
-
-                if (tokens.items.len == cursor) {
-                    self.stdout.interface.writeAll("\x08\x1b[0K") catch return error.EchoingStateFailed;
-                } else {
-                    try self.redraw(tokens.items, cursor + 1, cursor);
-                }
-
-                self.stdout.interface.flush() catch return error.EchoingStateFailed;
-            },
-
-            .interrupt => {
-                return error.CommandCanceled;
-            },
-
-            .EOF => {
-                return error.EndOfStream;
-            },
-
-            .clearScreen => {
-                return error.CommandCanceledAndClear;
-            },
-
-            .right => {
-                if (cursor < tokens.items.len) {
-                    cursor += 1;
-                    self.stdout.interface.writeAll("\x1b[1C") catch return error.EchoingStateFailed;
-                    self.stdout.interface.flush() catch return error.EchoingStateFailed;
-                }
-            },
-            .left => {
-                if (cursor > 1) {
-                    cursor -= 1;
-                    self.stdout.interface.writeAll("\x1b[1D") catch return error.EchoingStateFailed;
-                    self.stdout.interface.flush() catch return error.EchoingStateFailed;
-                }
-            },
-
-            else => {
-                // std.debug.print("token ignored\n", .{});
-            },
-        }
-    }
-
-    var command_writer = try std.Io.Writer.Allocating.initCapacity(self.allocator, 256);
-    defer command_writer.deinit();
-
-    for (tokens.items) |token| {
-        switch (token) {
-            .char => |c| {
-                command_writer.writer.writeAll(c.get()) catch return error.ReadingCommandFailed;
-            },
-            .space => {
-                command_writer.writer.writeByte(' ') catch return error.ReadingCommandFailed;
-            },
-            else => unreachable,
-        }
-    }
-
-    return try allocator.dupe(u8, command_writer.written());
 }

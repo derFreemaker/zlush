@@ -22,7 +22,7 @@ pub fn deinit(self: *WinConsoleReader, allocator: std.mem.Allocator) void {
     _ = allocator;
 }
 
-pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ OutOfMemory, ReadFailed }!InputToken {
+pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!InputToken {
     while (true) {
         const event = try self.peekEvent();
 
@@ -41,21 +41,21 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                     11 => return .vertical_tab,
                     12 => return .form_feed,
 
-                    32...126 => return InputToken{ .char = .{
+                    32...126 => return InputToken{ .grapheme = .{ .single = .{
                         .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
                         .len = 1,
                         .dw = 1,
-                    } },
+                    } } },
 
                     127 => return .delete,
 
                     160...255 => {
                         const buf: [4]u8, const len: u3 = utf16ToUtf8(key_event.uChar.UnicodeChar);
-                        return InputToken{ .char = .{
+                        return InputToken{ .grapheme = .{ .single = .{
                             .buf = buf,
                             .len = len,
                             .dw = 1,
-                        } };
+                        } } };
                     },
 
                     else => {},
@@ -69,16 +69,17 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
                         if (std.unicode.utf16IsHighSurrogate(key_event.uChar.UnicodeChar)) {
                             const next_event = (try self.peekEvent()).key;
                             self.tossEvent();
-                            
+
                             const code_point = std.unicode.utf16DecodeSurrogatePair(&.{ key_event.uChar.UnicodeChar, next_event.uChar.UnicodeChar }) catch unreachable;
 
-                            var token = InputToken{ .char = undefined };
-                            token.char.len = std.unicode.utf8Encode(code_point, &token.char.buf) catch unreachable;
-                            token.char.dw = 2;
-                            
+                            var token = InputToken{ .grapheme = .{ .single = undefined } };
+                            token.grapheme.single.len = std.unicode.utf8Encode(code_point, &token.grapheme.single.buf) catch unreachable;
+                            token.grapheme.single.dw = 2;
+
                             return token;
                         }
 
+                        //TODO: implement cache/storage for graphemes
                         @panic("not implemented");
                     },
 
@@ -170,7 +171,7 @@ pub fn nextToken(self: *WinConsoleReader, allocator: std.mem.Allocator) error{ O
             else => {
                 self.tossEvent();
                 // std.debug.print("got unsupported event: {s}\n", .{@tagName(event)});
-                return self.nextToken(allocator);
+                return self.nextToken();
             },
         }
 

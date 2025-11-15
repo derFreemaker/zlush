@@ -29,3 +29,5 @@ fn zlush_panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
 
     std.debug.defaultPanic(msg, first_trace_addr);
 }
+
+pub const tracy_impl = @import("tracy_impl");

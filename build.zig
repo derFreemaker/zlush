@@ -3,51 +3,78 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    
-    const mod = b.addModule("zlush", .{
+
+    const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
-        
-        .root_source_file = b.path("src/root.zig"),
+
+        .root_source_file = b.path("src/common/common.zig"),
     });
 
-    const exe = b.addExecutable(.{
+    const zlush_mod = b.addModule("zlush", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/root.zig"),
+        .imports = &.{
+            .{ .name = "common", .module = common_mod },
+        },
+    });
+
+    const zlush_exe = b.addExecutable(.{
         .name = "zlush",
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = target,
-            
+
             .root_source_file = b.path("src/main.zig"),
             .imports = &.{
-                .{ .name = "zlush", .module = mod },
+                .{ .name = "common", .module = common_mod },
+
+                .{ .name = "zlush", .module = zlush_mod },
             },
         }),
     });
-    exe.linkLibC();
+    zlush_exe.linkLibC();
+    b.installArtifact(zlush_exe);
 
-    b.installArtifact(exe);
+    // Tracy
+    {
+        const tracy_enabled = b.option(
+            bool,
+            "tracy",
+            "Build with Tracy support.",
+        ) orelse false;
 
-    const run_step = b.step("run", "Run the app");
+        const tracy = b.dependency("tracy", .{
+            .target = target,
+            .optimize = optimize,
+        });
 
-    const run_cmd = b.addRunArtifact(exe);
-    run_step.dependOn(&run_cmd.step);
-
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        zlush_exe.root_module.addImport("tracy", tracy.module("tracy"));
+        if (tracy_enabled) {
+            zlush_exe.root_module.addImport("tracy_impl", tracy.module("tracy_impl_enabled"));
+        } else {
+            zlush_exe.root_module.addImport("tracy_impl", tracy.module("tracy_impl_disabled"));
+        }
     }
 
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
+    const common_mod_tests = b.addTest(.{
+        .root_module = common_mod,
     });
-    const run_mod_tests = b.addRunArtifact(mod_tests);
+    const run_common_mod_tests = b.addRunArtifact(common_mod_tests);
 
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
+    const zlush_mod_tests = b.addTest(.{
+        .root_module = zlush_mod,
     });
-    const run_exe_tests = b.addRunArtifact(exe_tests);
-    
+    const run_zlush_mod_tests = b.addRunArtifact(zlush_mod_tests);
+
+    const zlush_exe_tests = b.addTest(.{
+        .root_module = zlush_exe.root_module,
+    });
+    const run_zlush_exe_tests = b.addRunArtifact(zlush_exe_tests);
+
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_common_mod_tests.step);
+    test_step.dependOn(&run_zlush_mod_tests.step);
+    test_step.dependOn(&run_zlush_exe_tests.step);
 }
