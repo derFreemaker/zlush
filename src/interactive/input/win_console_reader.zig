@@ -1,7 +1,7 @@
 const std = @import("std");
 const windows = std.os.windows;
 
-const c = @import("../win_console_c.zig");
+const c = @import("win_console_c.zig");
 
 const InputToken = @import("input_token.zig").InputToken;
 

@@ -114,7 +114,7 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
             },
 
             .right => {
-                if (self.graphemes.cur_idx < self.graphemes.len() and self.graphemes.moveGapRight(1)) {
+                if (self.graphemes.moveGapRight(1)) {
                     const first_half = self.graphemes.firstHalf();
                     const dw = first_half[first_half.len - 1].dw();
                     self.cursor_dpos += dw;

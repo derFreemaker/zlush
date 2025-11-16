@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const win_c = @import("win_console_c.zig");
+const win_c = @import("input/win_console_c.zig");
 
 var original_state: ?if (builtin.os.tag == .windows)
     WindowsState
