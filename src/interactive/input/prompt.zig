@@ -17,7 +17,7 @@ reader: ConsoleReader,
 writer: *std.Io.Writer,
 
 cursor_dpos: usize,
-graphemes: common.GapBuffer(Grapheme, .{ .grow = .{ .fixed = 32 } }),
+graphemes: common.GapBuffer(Grapheme, .{}),
 
 pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) Prompt {
     return Prompt{
