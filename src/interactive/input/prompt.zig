@@ -19,11 +19,11 @@ writer: *std.Io.Writer,
 cursor_dpos: usize,
 graphemes: common.GapBuffer(Grapheme, .{}),
 
-pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) Prompt {
+pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) error{OutOfMemory}!Prompt {
     return Prompt{
         .allocator = allocator,
 
-        .reader = .init(allocator),
+        .reader = try .init(allocator),
         .writer = writer,
 
         .cursor_dpos = 0,
@@ -33,6 +33,7 @@ pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) Prompt {
 
 pub fn deinit(self: *Prompt) void {
     self.graphemes.clearAndFree(self.allocator);
+    self.reader.deinit();
 }
 
 pub fn redraw(self: *Prompt) error{EchoingStateFailed}!void {
@@ -62,13 +63,14 @@ pub fn redraw(self: *Prompt) error{EchoingStateFailed}!void {
     }
 
     self.writer.flush() catch return error.EchoingStateFailed;
-    
+
     self.cursor_dpos = dw_first;
 }
 
 pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCanceled, CommandCanceledAndClear, EndOfInput, OutOfMemory, ReadingCommandFailed, EchoingStateFailed }![]const u8 {
     while (true) {
         const token = self.reader.nextToken() catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
             error.ReadFailed => return error.ReadingCommandFailed,
             // error.EndOfStream => return error.EndOfStream,
         };

@@ -7,26 +7,34 @@ const InputToken = @import("input_token.zig").InputToken;
 
 const WinConsoleReader = @This();
 
-event: ?c.InputRecord,
+allocator: std.mem.Allocator,
 
-pub fn init(allocator: std.mem.Allocator) WinConsoleReader {
-    _ = allocator;
+events: std.ArrayListUnmanaged(c.InputRecord),
 
+pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!WinConsoleReader {
     return WinConsoleReader{
-        .event = null,
+        .allocator = allocator,
+
+        .events = try .initCapacity(allocator, 32),
     };
 }
 
-pub fn deinit(self: *WinConsoleReader, allocator: std.mem.Allocator) void {
-    _ = self;
-    _ = allocator;
+pub fn deinit(self: *WinConsoleReader) void {
+    self.events.deinit(self.allocator);
 }
 
-pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!InputToken {
+pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!InputToken {
     while (true) {
-        const event = try self.peekEvent();
+        const event = self.peekEvent();
+        if (event == null) {
+            self.readNextEvents() catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.Unexpected => return error.ReadFailed,
+            };
+            continue;
+        }
 
-        switch (event) {
+        switch (event.?) {
             .key => |key_event| {
                 self.tossEvent();
 
@@ -67,7 +75,8 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!InputToken {
 
                     0x00 => {
                         if (std.unicode.utf16IsHighSurrogate(key_event.uChar.UnicodeChar)) {
-                            const next_event = (try self.peekEvent()).key;
+                            // we assume there is another event completing this one
+                            const next_event = self.peekEvent().?.key;
                             self.tossEvent();
 
                             const code_point = std.unicode.utf16DecodeSurrogatePair(&.{ key_event.uChar.UnicodeChar, next_event.uChar.UnicodeChar }) catch unreachable;
@@ -80,7 +89,7 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!InputToken {
                         }
 
                         //TODO: implement cache/storage for graphemes
-                        @panic("not implemented");
+                        std.debug.panic("not implemented: {any}", .{key_event});
                     },
 
                     0x09 => return .tab,
@@ -203,38 +212,42 @@ fn utf16ToUtf8(code_unit: u16) std.meta.Tuple(&.{ [4]u8, u3 }) {
     return .{ bytes, len };
 }
 
-//TODO: instead of reading one event read like 10 or 20 at once
-
-fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!c.InputRecord {
-    while (self.event == null) {
-        if (readNextEvent() catch return error.ReadFailed) |event| {
-            self.event = event;
-            return event;
-        }
+fn peekEvent(self: *WinConsoleReader) ?c.InputRecord {
+    if (self.events.items.len == 0) {
+        return null;
     }
-
-    return self.event.?;
+    return self.events.items[0];
 }
 
 fn tossEvent(self: *WinConsoleReader) void {
-    self.event = null;
+    _ = self.events.orderedRemove(0);
 }
 
-fn readNextEvent() error{Unexpected}!?c.InputRecord {
+fn readNextEvents(self: *WinConsoleReader) error{ OutOfMemory, Unexpected }!void {
     const stdin_handle = std.fs.File.stdin().handle;
 
     var numEvents: u32 = 0;
-    var input: [1]c.INPUT_RECORD = undefined;
-    if (c.ReadConsoleInputW(stdin_handle, &input, 1, &numEvents) == 0) {
+    if (c.GetNumberOfConsoleInputEvents(stdin_handle, &numEvents) == 0) {
         return windows.unexpectedError(windows.kernel32.GetLastError());
     }
     if (numEvents == 0) {
-        return null;
+        return;
     }
 
-    const transform = c.InputRecord.from(input[0]);
-    if (transform == .key and transform.key.bKeyDown == 0) {
-        return null;
+    var dummy: u32 = 0;
+    const buf = try self.allocator.alloc(c.INPUT_RECORD, numEvents);
+    defer self.allocator.free(buf);
+    if (c.ReadConsoleInputW(stdin_handle, buf.ptr, numEvents, &dummy) == 0) {
+        return windows.unexpectedError(windows.kernel32.GetLastError());
     }
-    return transform;
+
+    try self.events.ensureUnusedCapacity(self.allocator, buf.len);
+    for (buf) |event| {
+        const transform = c.InputRecord.from(event);
+        if (transform == .key and transform.key.bKeyDown == 0) {
+            continue;
+        }
+
+        self.events.appendAssumeCapacity(transform);
+    }
 }

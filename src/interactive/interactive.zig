@@ -69,9 +69,9 @@ pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) ![]const u8 
         try self.stdout.interface.writeAll("zlush> ");
         try self.stdout.interface.flush();
 
-        var prompt = Prompt.init(self.allocator, &self.stdout.interface);
+        var prompt = try Prompt.init(self.allocator, &self.stdout.interface);
         defer prompt.deinit();
-        
+
         const command = prompt.readCommand(allocator) catch |err| switch (err) {
             error.CommandCanceled => {
                 try self.stdout.interface.print("{f}^C{s}\n", .{

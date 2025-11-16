@@ -96,7 +96,7 @@ pub const InputRecord = union(InputRecordType) {
     /// used internally and should be ignored
     menu: MENU_EVENT_RECORD,
     focus: FOCUS_EVENT_RECORD,
-    
+
     pub fn from(record: INPUT_RECORD) InputRecord {
         switch (@as(InputRecordType, @enumFromInt(record.EventType))) {
             InputRecordType.key => {
@@ -171,4 +171,9 @@ pub extern "kernel32" fn PeekConsoleInputW(
     lpBuffer: PINPUT_RECORD,
     nLength: windows.DWORD,
     lpNumberOfEventsRead: *windows.DWORD,
+) callconv(.winapi) windows.BOOL;
+
+pub extern "kernel32" fn GetNumberOfConsoleInputEvents(
+    hConsoleInput: windows.HANDLE,
+    lpcNumberOfEvents: *windows.DWORD,
 ) callconv(.winapi) windows.BOOL;
