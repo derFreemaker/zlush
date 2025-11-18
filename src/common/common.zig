@@ -47,6 +47,8 @@ pub const GrowStrategie = union(enum) {
 pub const GapBufferConfig = _GapBuffer.GapBufferConfig;
 pub const GapBuffer = _GapBuffer.GapBuffer;
 
+pub const gwidth = @import("gwidth.zig");
+
 test {
     @setEvalBranchQuota(2_000_000);
     _ = std.testing.refAllDeclsRecursive(@This());

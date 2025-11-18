@@ -6,6 +6,18 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
+    const uucode_dep = b.dependency("uucode", .{
+        .target = target,
+        .optimize = optimize,
+
+        .fields = @as([]const []const u8, &.{
+            "east_asian_width",
+            "grapheme_break",
+            "general_category",
+            "is_emoji_presentation",
+        }),
+    });
+
     const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
@@ -19,6 +31,7 @@ pub fn build(b: *std.Build) !void {
                     .root_source_file = b.path("build.zig.zon"),
                 }),
             },
+            .{ .name = "uucode", .module = uucode_dep.module("uucode") },
         },
     });
 
@@ -36,7 +49,7 @@ pub fn build(b: *std.Build) !void {
     const zlush_exe = b.addExecutable(.{
         .name = "zlush",
         .version = version,
-        
+
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = target,

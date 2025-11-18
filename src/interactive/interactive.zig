@@ -40,7 +40,7 @@ pub fn deinit(self: *Interactive) void {
     RawMode.disable();
 }
 
-pub fn loop(self: *Interactive) !u8 {
+pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }!u8 {
     while (true) {
         defer self.stdout.interface.flush() catch @panic("unable to flush");
 
@@ -64,7 +64,7 @@ pub fn loop(self: *Interactive) !u8 {
     }
 }
 
-pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) ![]const u8 {
+pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }![]const u8 {
     while (true) {
         try self.stdout.interface.writeAll("zlush> ");
         try self.stdout.interface.flush();
@@ -88,7 +88,7 @@ pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) ![]const u8 
                 try self.stdout.interface.flush();
                 continue;
             },
-            else => return err,
+            else => |e| return e,
         };
 
         return command;

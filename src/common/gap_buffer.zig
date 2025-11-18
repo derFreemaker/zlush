@@ -169,7 +169,7 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
 test "GapBuffer" {
     const allocator = std.testing.allocator;
 
-    const gap_buf: GapBuffer(u8, .{}) = .init;
+    var gap_buf: GapBuffer(u8, .{}) = .init;
     defer gap_buf.deinit(allocator);
 
     try gap_buf.insertSliceAtCursor(allocator, "abc");
@@ -187,10 +187,10 @@ test "GapBuffer" {
     try std.testing.expect(gap_buf.growGapLeft(1));
     try std.testing.expectEqualStrings("ab", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("c", gap_buf.secondHalf());
-    try std.testing.expectEqual(2, gap_buf.cursor);
+    try std.testing.expectEqual(2, gap_buf.cur_idx);
 
     try std.testing.expect(gap_buf.growGapRight(1));
     try std.testing.expectEqualStrings("ab", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("", gap_buf.secondHalf());
-    try std.testing.expectEqual(2, gap_buf.cursor);
+    try std.testing.expectEqual(2, gap_buf.cur_idx);
 }

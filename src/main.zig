@@ -31,3 +31,8 @@ fn zlush_panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
 }
 
 pub const tracy_impl = @import("tracy_impl");
+
+test {
+    @setEvalBranchQuota(2_000_000);
+    _ = std.testing.refAllDeclsRecursive(@This());
+}
