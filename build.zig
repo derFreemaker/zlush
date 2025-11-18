@@ -1,20 +1,33 @@
 const std = @import("std");
+const manifest: @import("src/common/manifest.zig") = @import("build.zig.zon");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const version = try std.SemanticVersion.parse(manifest.version);
 
     const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
 
         .root_source_file = b.path("src/common/common.zig"),
+
+        .imports = &.{
+            .{
+                .name = "zon",
+                .module = b.createModule(.{
+                    .root_source_file = b.path("build.zig.zon"),
+                }),
+            },
+        },
     });
 
     const zlush_mod = b.addModule("zlush", .{
         .target = target,
         .optimize = optimize,
+
         .root_source_file = b.path("src/root.zig"),
+
         .imports = &.{
             .{ .name = "common", .module = common_mod },
         },
@@ -22,11 +35,14 @@ pub fn build(b: *std.Build) void {
 
     const zlush_exe = b.addExecutable(.{
         .name = "zlush",
+        .version = version,
+        
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = target,
 
             .root_source_file = b.path("src/main.zig"),
+
             .imports = &.{
                 .{ .name = "common", .module = common_mod },
 

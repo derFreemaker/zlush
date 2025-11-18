@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const manifest: @import("manifest.zig") = @import("zon");
+
 const _GapBuffer = @import("gap_buffer.zig");
 
 pub const GrowStrategie = union(enum) {

@@ -33,8 +33,8 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
             };
             continue;
         }
-
-        switch (event.?) {
+        
+        return switch (event.?) {
             .key => |key_event| {
                 self.tossEvent();
 
@@ -173,18 +173,17 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
                     0xb3 => return .media_play_pause,
 
                     else => {
-                        std.debug.panic("unknown wVirtualKeyCode: 0x{x} unichar code: {d}", .{ key_event.wVirtualKeyCode, key_event.uChar.UnicodeChar });
+                        // std.debug.panic("unknown wVirtualKeyCode: 0x{x} unichar code: {any}", .{ key_event.wVirtualKeyCode, key_event });
+                        continue;
                     },
                 }
             },
             else => {
                 self.tossEvent();
-                // std.debug.print("got unsupported event: {s}\n", .{@tagName(event)});
-                return self.nextToken();
+                // std.debug.print("got unsupported event: {s}\n", .{@tagName(event.?)});
+                continue;
             },
-        }
-
-        unreachable;
+        };
     }
 }
 
