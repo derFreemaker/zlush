@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const manifest: @import("manifest.zig") = @import("zon");
+pub const uucode = @import("uucode");
 
 const _GapBuffer = @import("gap_buffer.zig");
 

@@ -1,25 +1,30 @@
 const std = @import("std");
 const windows = std.os.windows;
+const uucode = @import("common").uucode;
 
 const c = @import("win_console_c.zig");
 
 const InputToken = @import("input_token.zig").InputToken;
+const GraphemeCache = @import("grapheme_cache.zig");
 
 const WinConsoleReader = @This();
 
 allocator: std.mem.Allocator,
 
+cache: GraphemeCache,
 events: std.ArrayListUnmanaged(c.InputRecord),
 
 pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!WinConsoleReader {
     return WinConsoleReader{
         .allocator = allocator,
 
+        .cache = try .init(allocator),
         .events = try .initCapacity(allocator, 32),
     };
 }
 
 pub fn deinit(self: *WinConsoleReader) void {
+    self.cache.deinit(self.allocator);
     self.events.deinit(self.allocator);
 }
 
@@ -33,8 +38,8 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
             };
             continue;
         }
-        
-        return switch (event.?) {
+
+        switch (event.?) {
             .key => |key_event| {
                 self.tossEvent();
 
@@ -58,7 +63,8 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
                     127 => return .delete,
 
                     160...255 => {
-                        const buf: [4]u8, const len: u3 = utf16ToUtf8(key_event.uChar.UnicodeChar);
+                        var buf: [4]u8 = undefined;
+                        const len: u3 = utf16ToUtf8(key_event.uChar.UnicodeChar, &buf);
                         return InputToken{ .grapheme = .{ .single = .{
                             .buf = buf,
                             .len = len,
@@ -74,7 +80,7 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
                     0x30...0x39, 0x41...0x5a => continue, // ignore input event
 
                     0x00 => {
-                        if (std.unicode.utf16IsHighSurrogate(key_event.uChar.UnicodeChar)) {
+                        if (self.remainingEvents() == 1 and std.unicode.utf16IsHighSurrogate(key_event.uChar.UnicodeChar)) {
                             // we assume there is another event completing this one
                             const next_event = self.peekEvent().?.key;
                             self.tossEvent();
@@ -88,8 +94,32 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
                             return token;
                         }
 
-                        //TODO: implement cache/storage for graphemes
-                        std.debug.panic("not implemented: {any}", .{key_event});
+                        var buf: [128]u8 = undefined;
+                        var len: usize = 0;
+
+                        len += self.parseUnicodeChar(key_event, &buf);
+
+                        var break_state: uucode.grapheme.BreakState = .default;
+                        var last_event = key_event;
+                        var last_cp = std.unicode.utf8Decode(buf[0..len]) catch unreachable;
+                        while (self.remainingEvents() != 0) {
+                            const next_event = self.peekEvent().?.key;
+                            const next_cp = next_event.uChar.UnicodeChar;
+                            
+                            const is_break = uucode.grapheme.isBreak(last_cp, next_cp, &break_state);
+                            std.debug.print("{}\n", .{is_break});
+                            if (is_break) {
+                                return InputToken{ .grapheme = self.cache.put(buf[0..len]) };
+                            }
+                            self.tossEvent();
+
+                            len += self.parseUnicodeChar(next_event, &buf);
+                            last_event = next_event;
+                            last_cp = next_cp;
+                        }
+
+                        const grapheme = self.cache.put(buf[0..len]);
+                        return InputToken{ .grapheme = grapheme };
                     },
 
                     0x09 => return .tab,
@@ -173,53 +203,80 @@ pub fn nextToken(self: *WinConsoleReader) error{ OutOfMemory, ReadFailed }!Input
                     0xb3 => return .media_play_pause,
 
                     else => {
-                        // std.debug.panic("unknown wVirtualKeyCode: 0x{x} unichar code: {any}", .{ key_event.wVirtualKeyCode, key_event });
+                        const log = std.log.scoped(.zlush);
+                        log.warn("unknown wVirtualKeyCode: 0x{x} unichar code: {any}", .{ key_event.wVirtualKeyCode, key_event });
+
                         continue;
                     },
                 }
             },
+
+            .focus => {
+                self.tossEvent(); // ignored
+            },
+
             else => {
                 self.tossEvent();
-                // std.debug.print("got unsupported event: {s}\n", .{@tagName(event.?)});
+
+                const log = std.log.scoped(.zlush);
+                log.warn("unsupported event: {s}\n", .{@tagName(event.?)});
+
                 continue;
             },
-        };
+        }
     }
 }
 
-fn utf16ToUtf8(code_unit: u16) std.meta.Tuple(&.{ [4]u8, u3 }) {
-    var bytes: [4]u8 = [_]u8{0} ** 4;
+fn utf16ToUtf8(code_unit: u16, buf: []u8) u3 {
     var len: u3 = 0;
 
     if (code_unit <= 0x7F) {
         // 1-byte sequence: 0xxxxxxx
-        bytes[0] = @intCast(code_unit);
+        buf[0] = @intCast(code_unit);
         len = 1;
     } else if (code_unit <= 0x7FF) {
         // 2-byte sequence: 110xxxxx 10xxxxxx
-        bytes[0] = @intCast(0xC0 | (code_unit >> 6));
-        bytes[1] = @intCast(0x80 | (code_unit & 0x3F));
+        buf[0] = @intCast(0xC0 | (code_unit >> 6));
+        buf[1] = @intCast(0x80 | (code_unit & 0x3F));
         len = 2;
     } else {
         // 3-byte sequence: 1110xxxx 10xxxxxx 10xxxxxx
-        bytes[0] = @intCast(0xE0 | (code_unit >> 12));
-        bytes[1] = @intCast(0x80 | ((code_unit >> 6) & 0x3F));
-        bytes[2] = @intCast(0x80 | (code_unit & 0x3F));
+        buf[0] = @intCast(0xE0 | (code_unit >> 12));
+        buf[1] = @intCast(0x80 | ((code_unit >> 6) & 0x3F));
+        buf[2] = @intCast(0x80 | (code_unit & 0x3F));
         len = 3;
     }
 
-    return .{ bytes, len };
+    return len;
 }
 
-fn peekEvent(self: *WinConsoleReader) ?c.InputRecord {
+fn parseUnicodeChar(self: *WinConsoleReader, event: c.KEY_EVENT_RECORD, buf: []u8) u3 {
+    if (std.unicode.utf16IsHighSurrogate(event.uChar.UnicodeChar)) {
+        // we assume there is another event completing this one
+        const completing_event = self.peekEvent().?.key;
+        self.tossEvent();
+   
+        const cp = std.unicode.utf16DecodeSurrogatePair(&.{ event.uChar.UnicodeChar, completing_event.uChar.UnicodeChar }) catch unreachable;
+
+        return std.unicode.utf8Encode(cp, buf) catch unreachable;
+    } else {
+        return utf16ToUtf8(event.uChar.UnicodeChar, buf);
+    }
+}
+
+inline fn peekEvent(self: *const WinConsoleReader) ?c.InputRecord {
     if (self.events.items.len == 0) {
         return null;
     }
     return self.events.items[0];
 }
 
-fn tossEvent(self: *WinConsoleReader) void {
+inline fn tossEvent(self: *WinConsoleReader) void {
     _ = self.events.orderedRemove(0);
+}
+
+inline fn remainingEvents(self: *const WinConsoleReader) usize {
+    return self.events.items.len;
 }
 
 fn readNextEvents(self: *WinConsoleReader) error{ OutOfMemory, Unexpected }!void {
