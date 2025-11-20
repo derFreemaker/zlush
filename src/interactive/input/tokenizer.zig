@@ -119,7 +119,6 @@ fn peekCodepoint(self: *Tokenizer) error{ InvalidUTF8, EndOfStream, ReadFailed }
 }
 
 fn tossCodepoint(self: *Tokenizer, c: u21) void {
-    std.debug.print("{}\n", .{c});
     self.stdin.interface.toss(std.unicode.utf8CodepointSequenceLength(c) catch unreachable);
 }
 

@@ -75,6 +75,10 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
             // error.EndOfStream => return error.EndOfStream,
         };
 
+        if (token == .grapheme and token.grapheme == .cluster) {
+            std.debug.print("{any}\n", .{token.grapheme.get()});
+        }
+
         switch (token) {
             .grapheme => |g| {
                 try self.graphemes.insertAtCursor(self.allocator, g);

@@ -1,23 +1,18 @@
 const std = @import("std");
-const manifest: @import("src/common/manifest.zig") = @import("build.zig.zon");
+const manifest: @import("manifest.zig") = @import("build.zig.zon");
+
+const unicode_build = @import("unicode/build.zig");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
-    const uucode_dep = b.dependency("uucode", .{
-        .target = target,
-        .optimize = optimize,
-
-        .fields = @as([]const []const u8, &.{
-            "east_asian_width",
-            "grapheme_break",
-            "general_category",
-            "is_emoji_presentation",
-        }),
-    });
-
+    const dwp_options = b.addOptions();
+    dwp_options.addOption(bool, "cjk", false);
+    dwp_options.addOption(?i4, "c0_width", null);
+    dwp_options.addOption(?i4, "c1_width", null);
+    
     const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
@@ -31,10 +26,12 @@ pub fn build(b: *std.Build) !void {
                     .root_source_file = b.path("build.zig.zon"),
                 }),
             },
-            .{ .name = "uucode", .module = uucode_dep.module("uucode") },
         },
     });
-
+    common_mod.addOptions("dwp_options", dwp_options);
+    common_mod.addAnonymousImport("gbp", .{ .root_source_file = unicode_build.buildGBPTables(b) });
+    common_mod.addAnonymousImport("dwp", .{ .root_source_file = unicode_build.buildDWPTables(b, dwp_options) });
+    
     const zlush_mod = b.addModule("zlush", .{
         .target = target,
         .optimize = optimize,

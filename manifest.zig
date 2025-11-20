@@ -5,7 +5,6 @@ fingerprint: u64,
 minimum_zig_version: []const u8,
 dependencies: struct {
     tracy: Dependency,
-    uucode: Dependency,
 },
 paths: []const []const u8,
 

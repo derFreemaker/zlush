@@ -1,7 +1,6 @@
 const std = @import("std");
 
-pub const manifest: @import("manifest.zig") = @import("zon");
-pub const uucode = @import("uucode");
+pub const manifest = @import("zon");
 
 const _GapBuffer = @import("gap_buffer.zig");
 
@@ -48,7 +47,10 @@ pub const GrowStrategie = union(enum) {
 pub const GapBufferConfig = _GapBuffer.GapBufferConfig;
 pub const GapBuffer = _GapBuffer.GapBuffer;
 
-pub const gwidth = @import("gwidth.zig");
+pub const unicode = struct {
+    pub const Graphemes = @import("unicode/graphemes.zig");
+    pub const DisplayWidth = @import("unicode/display_width.zig");
+};
 
 test {
     @setEvalBranchQuota(2_000_000);

@@ -8,10 +8,6 @@
             .url = "git+https://github.com/Games-By-Mason/tracy_zig#81acd22b8218668ad1215835fb21d63bf04ae6b4",
             .hash = "tracy-0.0.0-R7l8BSJIAQCSQWVPOIr-kFep8eSZzkD60a2h5O0gt3S2",
         },
-        .uucode = .{
-            .url = "git+https://github.com/jacobsandlund/uucode#5f05f8f83a75caea201f12cc8ea32a2d82ea9732",
-            .hash = "uucode-0.1.0-ZZjBPj96QADXyt5sqwBJUnhaDYs_qBeeKijZvlRa0eqM",
-        },
     },
     .paths = .{
         "build.zig",
