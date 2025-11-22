@@ -50,6 +50,7 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
 
                         127 => return ReadToken{ .event = .delete },
 
+                        // expanded ASCI table
                         160...255 => {
                             var buf: [4]u8 = undefined;
                             const len: u3 = @intCast(std.unicode.utf16LeToUtf8(&buf, &.{key_event.uChar.UnicodeChar}) catch unreachable);
