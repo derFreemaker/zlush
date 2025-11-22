@@ -31,18 +31,16 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
             .key => |key_event| {
                 self.tossEvent();
 
+                // std.debug.print("0x{x} - {any}\n", .{ key_event.wVirtualKeyCode, key_event });
+
                 if (key_event.uChar.UnicodeChar < 256) {
                     // see: https://www.ascii-code.com/
                     switch (key_event.uChar.AsciiChar) {
-                        3 => return ReadToken{ .event = .interrupt },
-                        4 => return ReadToken{ .event = .EOF },
-                        7 => return ReadToken{ .event = .bell },
-                        8 => return ReadToken{ .event = .backspace },
-                        9 => return ReadToken{ .event = .tab },
-                        11 => return ReadToken{ .event = .vertical_tab },
-                        12 => return ReadToken{ .event = .form_feed },
-
-                        32...126 => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                        32...47,
+                        58...64,
+                        91...96,
+                        123...126,
+                        => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
                             .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
                             .len = 1,
                             .dw = 1,
@@ -51,7 +49,7 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
                         127 => return ReadToken{ .event = .delete },
 
                         // expanded ASCI table
-                        160...255 => {
+                        128...255 => {
                             var buf: [4]u8 = undefined;
                             const len: u3 = @intCast(std.unicode.utf16LeToUtf8(&buf, &.{key_event.uChar.UnicodeChar}) catch unreachable);
                             return ReadToken{ .event = .{ .grapheme = .{ .single = .{
@@ -67,18 +65,48 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
 
                 // see: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
                 switch (key_event.wVirtualKeyCode) {
-                    0x30...0x39, 0x41...0x5a => continue, // ignore input event
+                    0x00 => {
+                        const cp = try self.getCodepoint(key_event);
+                        return ReadToken{ .cp = cp };
+                    },
 
+                    0x08 => return ReadToken{ .event = .backspace },
+                    0x09 => return ReadToken{ .event = .tab },
                     0x0D => return ReadToken{ .event = .enter },
                     0x25 => return ReadToken{ .event = .left },
                     0x26 => return ReadToken{ .event = .up },
                     0x27 => return ReadToken{ .event = .right },
                     0x28 => return ReadToken{ .event = .down },
-                    0x2e => return ReadToken{ .event = .delete },
+                    0x2E => return ReadToken{ .event = .delete },
 
-                    0x00 => {
-                        const cp = try self.getCodepoint(key_event);
-                        return ReadToken{ .cp = cp };
+                    // numbers (0-9) keys
+                    0x30...0x39 => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                        .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
+                        .len = 1,
+                        .dw = 1,
+                    } } } },
+
+                    // characters (a-z) keys
+                    0x41...0x5a => |key| {
+                        const ctrl_pressed =
+                            ((key_event.dwControlKeyState & c.left_ctrl_pressed) == c.left_ctrl_pressed) or
+                            ((key_event.dwControlKeyState & c.right_ctrl_pressed) == c.right_ctrl_pressed);
+
+                        if (!ctrl_pressed) {
+                            return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                                .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
+                                .len = 1,
+                                .dw = 1,
+                            } } } };
+                        }
+
+                        switch (key) {
+                            0x43 => return ReadToken{ .event = .interrupt },
+                            0x44 => return ReadToken{ .event = .EOF },
+                            0x47 => return ReadToken{ .event = .bell },
+                            0x4c => return ReadToken{ .event = .form_feed },
+                            else => continue,
+                        }
                     },
 
                     else => {

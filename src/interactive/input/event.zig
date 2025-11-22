@@ -5,15 +5,18 @@ pub const Event = union(enum) {
     winsize: Winsize,
 
     // special events
-    tab: void,
-    vertical_tab: void,
     enter: void,
-    interrupt: void,
     backspace: void,
     delete: void,
-    form_feed: void,
-    bell: void,
-    EOF: void,
+    tab: void,
+    vertical_tab: void,
+    
+    interrupt: void, // ctrl-c
+    form_feed: void, // ctrl-l
+    bell: void, // ctrl-g
+    EOF: void, // ctrl-d
+    
+    // arrows
     up: void,
     down: void,
     left: void,
