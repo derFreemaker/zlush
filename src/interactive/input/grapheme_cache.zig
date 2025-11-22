@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const Grapheme = @import("input_token.zig").InputToken.Grapheme;
-
 const GraphemeCache = @This();
 
 buf: []u8,
@@ -18,12 +16,9 @@ pub fn deinit(self: *GraphemeCache, allocator: std.mem.Allocator) void {
     allocator.free(self.buf);
 }
 
-pub fn put(self: *GraphemeCache, data: []const u8) []const u8 {
-    if (self.idx + data.len > self.buf.len) self.idx = 0;
-    defer self.idx += data.len;
+pub fn get(self: *GraphemeCache, n: usize) []u8 {
+    if (self.idx + n > self.buf.len) self.idx = 0;
+    defer self.idx += n;
 
-    const buffered = self.buf[self.idx .. self.idx + data.len];
-    @memcpy(buffered, data);
-
-    return buffered;
+    return self.buf[self.idx .. self.idx + n];
 }

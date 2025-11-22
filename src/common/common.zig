@@ -52,6 +52,8 @@ pub const unicode = struct {
     pub const DisplayWidth = @import("unicode/display_width.zig");
 };
 
+pub const Queue = @import("queue.zig").Queue;
+
 test {
     @setEvalBranchQuota(2_000_000);
     _ = std.testing.refAllDeclsRecursive(@This());
