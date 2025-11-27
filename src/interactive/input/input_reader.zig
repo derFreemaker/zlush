@@ -19,7 +19,7 @@ allocator: std.mem.Allocator,
 
 reader: ConsoleReader,
 
-cache: GraphemeCache,
+// cache: GraphemeCache,
 graphemes: common.unicode.Graphemes,
 dw: common.unicode.DisplayWidth,
 
@@ -37,7 +37,7 @@ pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!*InputReader {
 
         .reader = ConsoleReader.init(),
 
-        .cache = try .init(allocator),
+        // .cache = try .init(allocator),
         .graphemes = graphemes,
         .dw = try .initWithGraphemes(allocator, graphemes),
 
@@ -54,7 +54,7 @@ pub fn deinit(self: *InputReader) void {
 
     self.reader.deinit();
 
-    self.cache.deinit(self.allocator);
+    // self.cache.deinit(self.allocator);
     self.dw.deinit(self.allocator);
     self.graphemes.deinit(self.allocator);
 
@@ -95,7 +95,7 @@ fn runReader(self: *InputReader) !void {
     var cp_state: common.unicode.Graphemes.IterState = .{};
     var cp_buf: [32]u21 = undefined;
     var cp_len: usize = 0;
-    
+
     while (!self.should_quit) {
         const token = blk: {
             if (try self.reader.nextToken()) |token| {
@@ -103,7 +103,7 @@ fn runReader(self: *InputReader) !void {
             }
 
             if (cp_len > 0) {
-                const event = self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
+                const event = try self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
                 cp_state = .{};
                 cp_len = 0;
 
@@ -118,7 +118,7 @@ fn runReader(self: *InputReader) !void {
                 if (cp_len > 0) {
                     const is_break = common.unicode.Graphemes.graphemeBreak(cp_buf[cp_len - 1], cp, &self.graphemes, &cp_state);
                     if (is_break) {
-                        const event = self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
+                        const event = try self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
                         cp_state = .{};
                         cp_len = 0;
 
@@ -132,7 +132,7 @@ fn runReader(self: *InputReader) !void {
             },
             .event => |event| {
                 if (cp_len > 0) {
-                    const grapheme_event = self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
+                    const grapheme_event = try self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
                     cp_state = .{};
                     cp_len = 0;
 
@@ -145,22 +145,24 @@ fn runReader(self: *InputReader) !void {
     }
 }
 
-fn convertCodepointsToGraphemeEvent(self: *InputReader, code_points: []const u21) Event {
-    var required_len: usize = 0;
-    for (code_points) |cp| {
-        required_len += std.unicode.utf8CodepointSequenceLength(cp) catch unreachable;
+fn convertCodepointsToGraphemeEvent(self: *InputReader, codepoints: []const u21) error{OutOfMemory}!Event {
+    if (codepoints.len == 1) {
+        const cp = codepoints[0];
+        return Event{ .grapheme = common.unicode.UGF.UGFUnit.initSingle(cp, @intCast(self.dw.codePointWidth(cp))) };
     }
 
-    const buf = self.cache.get(required_len);
-    var buf_idx: usize = 0;
-    for (code_points) |cp| {
-        buf_idx += std.unicode.utf8Encode(cp, buf[buf_idx..]) catch unreachable;
+    var dw: u7 = 0;
+    for (codepoints) |cp| {
+        // this cannot / should not get negative
+        dw += @intCast(self.dw.codePointWidth(cp));
     }
 
-    return Event{ .grapheme = .{ .cluster = .{
-        .data = buf,
-        .dw = @intCast(self.dw.strWidth(buf)),
-    } } };
+    return Event{
+        .grapheme = common.unicode.UGF.UGFUnit.init(self.allocator, codepoints, dw) catch |err| switch (err) {
+            error.OutOfMemory => |e| return e,
+            else => |e| std.debug.panic("{s}", .{ @errorName(e) }),
+        },
+    };
 }
 
 pub const ReadToken = union(enum) {

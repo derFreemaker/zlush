@@ -3,7 +3,7 @@ const std = @import("std");
 const common = @import("common.zig");
 
 pub const GapBufferConfig = struct {
-    grow: common.GrowStrategie = .{ .fixed = 256 },
+    grow: common.GrowStrategie = .{ .fixed = 128 },
 };
 
 pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
@@ -87,10 +87,10 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
             self.gap_size -= slice.len;
         }
 
-        pub fn moveGapLeft(self: *Self, n: usize) bool {
+        pub fn moveGapLeft(self: *Self, n: usize) error{UnableToMoveGap}![]T {
             if (n > self.cur_idx) {
                 @branchHint(.cold);
-                return false;
+                return error.UnableToMoveGap;
             }
             const new_idx = self.cur_idx - n;
 
@@ -99,13 +99,13 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
             @memmove(dst, src);
 
             self.cur_idx = new_idx;
-            return true;
+            return dst;
         }
 
-        pub fn moveGapRight(self: *Self, n: usize) bool {
+        pub fn moveGapRight(self: *Self, n: usize) error{UnableToMoveGap}![]T {
             if (n > self.secondHalf().len) {
                 @branchHint(.cold);
-                return false;
+                return error.UnableToMoveGap;
             }
             const new_idx = self.cur_idx + n;
 
@@ -114,11 +114,15 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
             @memmove(dst, src);
 
             self.cur_idx = new_idx;
-            return true;
+            return dst;
         }
 
+        pub inline fn canGrowGapLeft(self: *const Self, n: usize) bool {
+            return self.cur_idx >= n;
+        } 
+        
         pub fn growGapLeft(self: *Self, n: usize) bool {
-            if (n > self.cur_idx) {
+            if (!self.canGrowGapLeft(n)) {
                 @branchHint(.cold);
                 return false;
             }
@@ -127,9 +131,13 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
             self.cur_idx -= n;
             return true;
         }
+        
+        pub inline fn canGrowGapRight(self: *const Self, n: usize) bool {
+            return self.secondHalf().len > n; 
+        }
 
         pub fn growGapRight(self: *Self, n: usize) bool {
-            if (n > self.secondHalf().len) {
+            if (!self.canGrowGapRight(n)) {
                 @branchHint(.cold);
                 return false;
             }
@@ -161,7 +169,7 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
         }
 
         pub inline fn len(self: *const Self) usize {
-            return self.firstHalf().len + self.secondHalf().len;
+            return self.buf.len - self.gap_size;
         }
     };
 }

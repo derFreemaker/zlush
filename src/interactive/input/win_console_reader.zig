@@ -31,8 +31,6 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
             .key => |key_event| {
                 self.tossEvent();
 
-                // std.debug.print("0x{x} - {any}\n", .{ key_event.wVirtualKeyCode, key_event });
-
                 if (key_event.uChar.UnicodeChar < 256) {
                     // see: https://www.ascii-code.com/
                     switch (key_event.uChar.AsciiChar) {
@@ -40,23 +38,25 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
                         58...64,
                         91...96,
                         123...126,
-                        => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
-                            .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
-                            .len = 1,
-                            .dw = 1,
-                        } } } },
+                        // => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                        //     .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
+                        //     .len = 1,
+                        //     .dw = 1,
+                        // } } } },
+                        => return ReadToken{ .cp = key_event.uChar.AsciiChar },
 
                         127 => return ReadToken{ .event = .delete },
 
                         // expanded ASCI table
                         128...255 => {
-                            var buf: [4]u8 = undefined;
-                            const len: u3 = @intCast(std.unicode.utf16LeToUtf8(&buf, &.{key_event.uChar.UnicodeChar}) catch unreachable);
-                            return ReadToken{ .event = .{ .grapheme = .{ .single = .{
-                                .buf = buf,
-                                .len = len,
-                                .dw = 1,
-                            } } } };
+                            // var buf: [4]u8 = undefined;
+                            // const len: u3 = @intCast(std.unicode.utf16LeToUtf8(&buf, &.{key_event.uChar.UnicodeChar}) catch unreachable);
+                            // return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                            //     .buf = buf,
+                            //     .len = len,
+                            //     .dw = 1,
+                            // } } } };
+                            return ReadToken{ .cp = key_event.uChar.UnicodeChar };
                         },
 
                         else => {},
@@ -80,11 +80,12 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
                     0x2E => return ReadToken{ .event = .delete },
 
                     // numbers (0-9) keys
-                    0x30...0x39 => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
-                        .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
-                        .len = 1,
-                        .dw = 1,
-                    } } } },
+                    // 0x30...0x39 => return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                    //     .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
+                    //     .len = 1,
+                    //     .dw = 1,
+                    // } } } },
+                    0x30...0x39 => return ReadToken{ .cp = key_event.uChar.AsciiChar },
 
                     // characters (a-z) keys
                     0x41...0x5a => |key| {
@@ -93,11 +94,12 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
                             ((key_event.dwControlKeyState & c.right_ctrl_pressed) == c.right_ctrl_pressed);
 
                         if (!ctrl_pressed) {
-                            return ReadToken{ .event = .{ .grapheme = .{ .single = .{
-                                .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
-                                .len = 1,
-                                .dw = 1,
-                            } } } };
+                            // return ReadToken{ .event = .{ .grapheme = .{ .single = .{
+                            //     .buf = .{ key_event.uChar.AsciiChar, 0, 0, 0 },
+                            //     .len = 1,
+                            //     .dw = 1,
+                            // } } } };
+                            return ReadToken{ .cp = key_event.uChar.AsciiChar };
                         }
 
                         switch (key) {
@@ -161,8 +163,7 @@ fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!?c.InputRecord {
         }
     }
 
-    const event = self.events[self.events_pos];
-    return event;
+    return self.events[self.events_pos];
 }
 
 inline fn tossEvent(self: *WinConsoleReader) void {

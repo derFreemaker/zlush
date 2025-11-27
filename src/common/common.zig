@@ -50,6 +50,9 @@ pub const GapBuffer = _GapBuffer.GapBuffer;
 pub const unicode = struct {
     pub const Graphemes = @import("unicode/graphemes.zig");
     pub const DisplayWidth = @import("unicode/display_width.zig");
+    
+    pub const UGF = @import("unicode/ugf.zig");
+    pub const UGF8 = @import("unicode/ugf8.zig");
 };
 
 pub const Queue = @import("queue.zig").Queue;
