@@ -148,19 +148,14 @@ fn runReader(self: *InputReader) !void {
 fn convertCodepointsToGraphemeEvent(self: *InputReader, codepoints: []const u21) error{OutOfMemory}!Event {
     if (codepoints.len == 1) {
         const cp = codepoints[0];
-        return Event{ .grapheme = common.unicode.UGF.UGFUnit.initSingle(cp, @intCast(self.dw.codePointWidth(cp))) };
+        return Event{ .grapheme = common.unicode.UGF.Unit.initSingle(cp, @intCast(self.dw.codePointWidth(cp))) };
     }
 
-    var dw: u7 = 0;
-    for (codepoints) |cp| {
-        // this cannot / should not get negative
-        dw += @intCast(self.dw.codePointWidth(cp));
-    }
-
+    const dw: u7 = @intCast(self.dw.codePointsWidth(codepoints));
     return Event{
-        .grapheme = common.unicode.UGF.UGFUnit.init(self.allocator, codepoints, dw) catch |err| switch (err) {
+        .grapheme = common.unicode.UGF.Unit.init(self.allocator, codepoints, dw) catch |err| switch (err) {
             error.OutOfMemory => |e| return e,
-            else => |e| std.debug.panic("{s}", .{ @errorName(e) }),
+            else => |e| std.debug.panic("{s}", .{@errorName(e)}),
         },
     };
 }

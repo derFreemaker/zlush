@@ -3,7 +3,7 @@ const common = @import("common");
 
 pub const Event = union(enum) {
     // grapheme: Grapheme,
-    grapheme: common.unicode.UGF.UGFUnit,
+    grapheme: common.unicode.UGF.Unit,
     winsize: Winsize,
 
     // special events

@@ -12,7 +12,7 @@ allocator: std.mem.Allocator,
 reader: *InputReader,
 writer: *std.Io.Writer,
 
-buf: common.unicode.UGF8.UGF8GapBuffer(.{}),
+buf: common.unicode.UGF8.GapBuffer(.{}),
 cursor_dpos: usize,
 
 pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) error{OutOfMemory}!Prompt {
@@ -32,7 +32,7 @@ pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) error{OutOfMem
 
 pub fn deinit(self: *Prompt) void {
     self.reader.deinit();
-
+    
     self.buf.clearAndFree(self.allocator);
 }
 
@@ -53,7 +53,7 @@ pub fn redraw(self: *Prompt) error{EchoingStateFailed}!void {
     
     self.writer.writeAll(self.buf.utf8.firstHalf()) catch return error.EchoingStateFailed;
     self.writer.writeAll(self.buf.utf8.secondHalf()) catch return error.EchoingStateFailed;
-
+    
     if (dw_second > 0) {
         self.writer.print("\x1b[{}D", .{dw_second}) catch return error.EchoingStateFailed;
     }
@@ -65,10 +65,12 @@ pub fn redraw(self: *Prompt) error{EchoingStateFailed}!void {
 
 pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCanceled, CommandCanceledAndClear, EndOfInput, OutOfMemory, EchoingStateFailed }![]const u8 {
     while (true) {
-        const event = self.reader.nextEvent();
+        var event = self.reader.nextEvent();
 
         switch (event) {
-            .grapheme => |g| {
+            .grapheme => |*g| {
+                defer g.deinit(self.allocator);
+                
                 self.buf.insertAtCursor(self.allocator, g) catch |err| switch (err) {
                     error.OutOfMemory => |e| return e,
                     else => unreachable,
@@ -126,19 +128,17 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
         }
     }
 
+    self.buf.moveGapRight(self.buf.secondHalf().len) catch unreachable;
+    
     var buf_len: usize = 0;
     for (self.buf.firstHalf()) |g| {
         buf_len += g.data.len;
     }
-    for (self.buf.secondHalf()) |g| {
-        buf_len += g.data.len;
-    }
-
+    
     var buf_writer: std.Io.Writer.Allocating = try .initCapacity(allocator, buf_len);
     defer buf_writer.deinit();
 
     buf_writer.writer.writeAll(self.buf.utf8.firstHalf()) catch unreachable;
-    buf_writer.writer.writeAll(self.buf.utf8.secondHalf()) catch unreachable;
 
     return buf_writer.toOwnedSlice();
 }

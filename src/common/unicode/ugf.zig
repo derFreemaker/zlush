@@ -1,65 +1,71 @@
 const std = @import("std");
 
-pub const UGFUnit = struct {
-    data: UGFUnitData,
+pub const Unit = struct {
+    data: UnitData,
     dw: u7,
 
-    pub inline fn initSingle(cp: u21, dw: u7) UGFUnit {
-        const data = UGFUnitData{ .single = cp };
+    pub inline fn initSingle(cp: u21, dw: u7) Unit {
+        const data = UnitData{ .single = cp };
 
-        return UGFUnit{
+        return Unit{
             .data = data,
             .dw = dw,
         };
     }
 
-    pub fn init(allocator: std.mem.Allocator, codepoints: []const u21, dw: u7) error{ OutOfMemory, TooManyCodepoints }!UGFUnit {
+    pub fn init(allocator: std.mem.Allocator, codepoints: []const u21, dw: u7) error{ OutOfMemory, NotEnoughCodepoints, TooManyCodepoints }!Unit {
+        if (codepoints.len == 0) {
+            return error.NotEnoughCodepoints;
+        }
         if (codepoints.len > std.math.maxInt(u13)) {
             return error.TooManyCodepoints;
         }
 
         const codepoints_copy = try allocator.dupe(u21, codepoints);
 
-        const data = UGFUnitData{ .multiple = .{
+        const data = UnitData{ .multiple = .{
             .codepoints = codepoints_copy.ptr,
-            .len = @intCast(codepoints.len),
+            .len = @intCast(codepoints.len - 1),
         } };
 
-        return UGFUnit{
+        return Unit{
             .data = data,
             .dw = dw,
         };
     }
 
-    pub fn initBuf(codepoints: []const u21, dw: u7) error{TooManyCodepoints}!UGFUnit {
+    pub fn initBuf(codepoints: []const u21, dw: u7) error{ NotEnoughCodepoints, TooManyCodepoints }!Unit {
+        if (codepoints.len == 0) {
+            return error.NotEnoughCodepoints;
+        }
         if (codepoints.len > std.math.maxInt(u13)) {
             return error.TooManyCodepoints;
         }
 
-        const data = UGFUnitData{ .multiple = .{
+        const data = UnitData{ .multiple = .{
             .codepoints = codepoints.ptr,
-            .len = @intCast(codepoints.len),
+            .len = @intCast(codepoints.len - 1),
         } };
 
-        return UGFUnit{
+        return Unit{
             .data = data,
             .dw = dw,
         };
     }
 
-    pub fn deinit(self: *UGFUnit, allocator: std.mem.Allocator) void {
-        allocator.free(self.slice());
+    pub fn deinit(self: *Unit, allocator: std.mem.Allocator) void {
+        self.data.deinit(allocator);
     }
 
-    pub inline fn slice(self: *const UGFUnit) []const u21 {
+    pub inline fn slice(self: *const Unit) []const u21 {
         return self.data.slice();
     }
 
-    pub const UGFUnitData = union(enum) {
+    pub const UnitData = union(enum) {
         single: u21,
-        multiple: UGFUnitDataMultiple,
+        multiple: Multiple,
 
-        pub fn deinit(self: *UGFUnitData, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *UnitData, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .single => {},
                 .multiple => |m| {
@@ -68,7 +74,7 @@ pub const UGFUnit = struct {
             }
         }
 
-        pub inline fn slice(self: *const UGFUnitData) []const u21 {
+        pub inline fn slice(self: *const UnitData) []const u21 {
             switch (self.*) {
                 .single => |*s| {
                     return @as([*]const u21, @ptrCast(s))[0..1];
@@ -79,11 +85,11 @@ pub const UGFUnit = struct {
             }
         }
 
-        pub const UGFUnitDataMultiple = struct {
+        pub const Multiple = struct {
             codepoints: [*]const u21,
             len: u13,
 
-            pub inline fn slice(self: *const UGFUnitDataMultiple) []const u21 {
+            pub inline fn slice(self: *const Multiple) []const u21 {
                 return self.codepoints[0 .. self.len + 1];
             }
         };

@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const common = @import("common");
 
 const Interactive = @import("interactive/interactive.zig");
 
@@ -16,7 +17,10 @@ pub fn main() !u8 {
     defer if (builtin.mode == .Debug) if (gpa.deinit() == .leak) @panic("leaks detected");
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else arena_allocator.allocator();
 
-    var interactive = try Interactive.init(allocator);
+    var sw = try common.Stopwatch.init(allocator);
+    defer sw.deinit();
+    
+    var interactive = try Interactive.init(allocator, &sw);
     defer interactive.deinit();
     return interactive.loop();
 }

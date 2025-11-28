@@ -3,17 +3,17 @@ const common = @import("../common.zig");
 
 const UGF = @import("ugf.zig");
 
-pub const UGF8GapBufferConfig = struct {
+pub const GapBufferConfig = struct {
     utf8: common.GapBufferConfig = .{},
     units: common.GapBufferConfig = .{},
 };
 
-pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
+pub fn GapBuffer(comptime config: GapBufferConfig) type {
     return struct {
         const Self = @This();
 
         utf8: common.GapBuffer(u8, config.utf8) = .init,
-        units: common.GapBuffer(UGF8Unit, config.units) = .init,
+        units: common.GapBuffer(Unit, config.units) = .init,
 
         pub const init = Self{};
 
@@ -22,15 +22,15 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
             self.utf8.deinit(allocator);
         }
 
-        pub inline fn firstHalf(self: *const Self) []const UGF8Unit {
+        pub inline fn firstHalf(self: *const Self) []const Unit {
             return self.units.firstHalf();
         }
 
-        pub inline fn secondHalf(self: *const Self) []const UGF8Unit {
+        pub inline fn secondHalf(self: *const Self) []const Unit {
             return self.units.secondHalf();
         }
 
-        pub fn insertAtCursor(self: *Self, allocator: std.mem.Allocator, unit: UGF.UGFUnit) error{ OutOfMemory, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+        pub fn insertAtCursor(self: *Self, allocator: std.mem.Allocator, unit: *const UGF.Unit) error{ OutOfMemory, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             var utf8_len: usize = 0;
             for (unit.slice()) |cp| {
                 utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
@@ -49,7 +49,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
             return insertAtCursorAssumeCapacity(self, unit);
         }
 
-        pub inline fn insertAtCursorAssumeCapacity(self: *Self, unit: UGF.UGFUnit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+        pub inline fn insertAtCursorAssumeCapacity(self: *Self, unit: *const UGF.Unit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             var utf8_len: usize = 0;
             for (unit.slice()) |cp| {
                 utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
@@ -62,7 +62,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
                 self.utf8.insertSliceAtCursorAssumeCapacity(buf[0..cp_utf8_len]);
             }
 
-            const ugf8_unit = UGF8Unit{
+            const ugf8_unit = Unit{
                 .data = self.utf8.buf[self.utf8.cur_idx - utf8_len .. self.utf8.cur_idx],
                 .dw = unit.dw,
             };
@@ -70,7 +70,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
             self.units.insertAtCursorAssumeCapacity(ugf8_unit);
         }
 
-        pub fn insertSliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF.UGFUnit) std.mem.Allocator.Error!void {
+        pub fn insertSliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF.Unit) std.mem.Allocator.Error!void {
             var utf8_len: usize = 0;
             for (slice) |unit| {
                 for (unit.slice()) |cp| {
@@ -91,7 +91,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
             @call(.always_inline, insertSliceAtCursorAssumeCapacity, .{ self, slice });
         }
 
-        pub fn insertSliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF.UGFUnit) void {
+        pub fn insertSliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF.Unit) void {
             for (slice) |unit| {
                 self.insertAtCursorAssumeCapacity(unit);
             }
@@ -130,7 +130,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
                 return false;
             }
 
-            const removed_units: []const UGF8Unit = self.units.firstHalf()[self.units.firstHalf().len - n .. self.units.firstHalf().len];
+            const removed_units: []const Unit = self.units.firstHalf()[self.units.firstHalf().len - n .. self.units.firstHalf().len];
             
             var utf8_len: usize = 0;
             for (removed_units) |unit| {
@@ -152,7 +152,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
                 return false;
             }
 
-            const removed_units: []const UGF8Unit = self.units.secondHalf()[0..n];
+            const removed_units: []const Unit = self.units.secondHalf()[0..n];
 
             var utf8_len: usize = 0;
             for (removed_units) |unit| {
@@ -184,7 +184,7 @@ pub fn UGF8GapBuffer(comptime config: UGF8GapBufferConfig) type {
     };
 }
 
-pub const UGF8Unit = struct {
+pub const Unit = struct {
     data: []const u8,
     dw: u7,
 };

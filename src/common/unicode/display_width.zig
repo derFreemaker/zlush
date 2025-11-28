@@ -102,6 +102,35 @@ test "codePointWidth" {
     try testing.expectEqual(@as(i4, 2), dw.codePointWidth('统'));
 }
 
+pub fn codePointsWidth(dw: DisplayWidth, codepoints: []const u21) i4 {
+    var gw: i4 = 0;
+    var i: usize = 0;
+    while (codepoints.len > i) : (i += 1) {
+        const cp = codepoints[i];
+        var w = dw.codePointWidth(cp);
+
+        if (w != 0) {
+            // Handle text emoji sequence.
+            if (codepoints.len > i) {
+                i += 1;
+                const ncp = codepoints[i];
+
+                // emoji text sequence.
+                if (ncp == 0xFE0E) w = 1;
+                if (ncp == 0xFE0F) w = 2;
+            }
+
+            // Only adding width of first non-zero-width code point.
+            if (gw == 0) {
+                gw = w;
+                break;
+            }
+        }
+    }
+    
+    return gw;
+}
+
 /// strWidth returns the total display width of `str` as the number of cells
 /// required in a fixed-pitch font (i.e. a terminal screen).
 pub fn strWidth(dw: DisplayWidth, str: []const u8) usize {

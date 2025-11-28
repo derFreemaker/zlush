@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const common = @import("common");
 
 const AnsiColor = @import("../utils/ansi_color.zig");
 const RawMode = @import("raw_mode.zig");
@@ -16,7 +17,12 @@ stdout: std.fs.File.Writer,
 stderr_buf: []u8,
 stderr: std.fs.File.Writer,
 
-pub fn init(allocator: std.mem.Allocator) error{ FailedToSetRawMode, OutOfMemory }!Interactive {
+sw: *common.Stopwatch,
+
+pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ FailedToSetRawMode, OutOfMemory }!Interactive {
+    try sw.begin("interactive initialize");
+    defer sw.end();
+    
     RawMode.enable() catch return error.FailedToSetRawMode;
 
     const stdout_buf = try allocator.alloc(u8, 1024);
@@ -30,6 +36,8 @@ pub fn init(allocator: std.mem.Allocator) error{ FailedToSetRawMode, OutOfMemory
 
         .stderr_buf = stderr_buf,
         .stderr = std.fs.File.stderr().writer(stderr_buf),
+        
+        .sw = sw,
     };
 }
 
@@ -41,6 +49,7 @@ pub fn deinit(self: *Interactive) void {
 }
 
 pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }!u8 {
+    try self.sw.display(&self.stdout.interface);
     while (true) {
         defer self.stdout.interface.flush() catch @panic("unable to flush");
 
