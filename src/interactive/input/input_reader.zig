@@ -89,6 +89,10 @@ pub fn postEvent(self: *InputReader, event: Event) void {
     self.queue.push(event);
 }
 
+pub fn getWindowSize(self: *InputReader) !Event.Winsize {
+    return self.reader.getWindowSize();
+}
+
 fn runReader(self: *InputReader) !void {
     if (builtin.is_test) return;
 

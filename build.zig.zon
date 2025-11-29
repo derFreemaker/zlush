@@ -8,6 +8,10 @@
             .url = "git+https://github.com/Games-By-Mason/tracy_zig#81acd22b8218668ad1215835fb21d63bf04ae6b4",
             .hash = "tracy-0.0.0-R7l8BSJIAQCSQWVPOIr-kFep8eSZzkD60a2h5O0gt3S2",
         },
+        .ansi_escape = .{
+            .url = "https://github.com/hendriknielaender/ansi-escape.zig/archive/c78b33d.tar.gz",
+            .hash = "ansi_escape-0.3.0-aPb1J35LAAC6DMir9iht5fZE4WtVFBG0e3VGHRgsE0cu",
+        },
     },
     .paths = .{
         "build.zig",

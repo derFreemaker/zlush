@@ -23,6 +23,11 @@ pub const Event = union(enum) {
     down: void,
     left: void,
     right: void,
+
+    pub const Winsize = struct {
+        cols: u32,
+        rows: u32,
+    };
 };
 
 // pub const Grapheme = union(enum) {
@@ -66,7 +71,3 @@ pub const Event = union(enum) {
 //     };
 // };
 
-pub const Winsize = struct {
-    cols: u32,
-    rows: u32,
-};

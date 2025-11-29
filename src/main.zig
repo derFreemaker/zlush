@@ -19,7 +19,7 @@ pub fn main() !u8 {
 
     var sw = try common.Stopwatch.init(allocator);
     defer sw.deinit();
-    
+
     var interactive = try Interactive.init(allocator, &sw);
     defer interactive.deinit();
     return interactive.loop();

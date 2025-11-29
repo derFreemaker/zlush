@@ -1,0 +1,301 @@
+const std = @import("std");
+const common = @import("common");
+const UGF = common.unicode.UGF;
+
+const Winsize = @import("event.zig").Event.Winsize;
+
+const PromptWriter = @This();
+
+allocator: std.mem.Allocator,
+
+writer: *std.Io.Writer,
+identation: u32,
+winsize: Vec2,
+
+buf: common.unicode.UGF8.GapBuffer(.{}),
+cursor: Vec2,
+end: Vec2,
+
+pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, identation: u32, winsize: Winsize) PromptWriter {
+    return PromptWriter{
+        .allocator = allocator,
+
+        .writer = writer,
+        .identation = identation,
+        .winsize = Vec2{ .x = winsize.cols, .y = winsize.rows },
+
+        .buf = .empty,
+        .cursor = Vec2{ .x = identation, .y = 0 },
+        .end = Vec2{ .x = identation, .y = 0 },
+    };
+}
+
+pub fn deinit(self: *PromptWriter) void {
+    self.buf.deinit(self.allocator);
+}
+
+pub fn redraw(self: *PromptWriter) error{WriteFailed}!void {
+    try self.reset();
+    try self.flush();
+
+    try self.draw();
+    try self.flush();
+}
+
+pub fn reset(self: *PromptWriter) error{WriteFailed}!void {
+    if (self.end.y > 0) {
+        if (self.end.y - self.cursor.y > 0) {
+            try common.ansi.cursor.next_line(self.writer, self.end.y - self.cursor.y);
+        } else {
+            try common.ansi.cursor.to(self.writer, 0, null);
+        }
+
+        while (self.end.y > 0) {
+            try common.ansi.erase.line(self.writer);
+            try common.ansi.cursor.prev_line(self.writer, 1);
+            self.end.y -= 1;
+        }
+    }
+
+    try common.ansi.cursor.to(self.writer, self.identation, null);
+    try common.ansi.erase.line_end(self.writer);
+
+    self.cursor = Vec2{ .x = self.identation, .y = 0 };
+    self.end = Vec2{ .x = self.identation, .y = 0 };
+}
+
+pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
+    if (self.buf.len() == 0) {
+        @branchHint(.cold);
+        return;
+    }
+
+    try self.writeText(self.buf.utf8.firstHalf());
+    const cursor_edit_pos = self.cursor;
+
+    try self.writeText(self.buf.utf8.secondHalf());
+    self.end = self.cursor;
+
+    if (self.end.y > cursor_edit_pos.y) {
+        try common.ansi.cursor.prev_line(self.writer, self.end.y - cursor_edit_pos.y);
+    }
+    try common.ansi.cursor.to(self.writer, cursor_edit_pos.x, null);
+
+    self.cursor = cursor_edit_pos;
+}
+
+// fn writeText(self: *PromptWriter, text: []const u8, wrap_first: bool) error{WriteFailed}!void {
+//     if (text.len == 0) {
+//         return;
+//     }
+//
+//     var i: usize = 0;
+//     while (i < text.len) {
+//         const remaining_space = self.winsize.x - self.cursor.x;
+//
+//         const next_space: ?usize = blk: {
+//             var j = i;
+//             while (j < text.len) : (j += 1) {
+//                 if (text[j] == ' ') {
+//                     break :blk j;
+//                 }
+//             }
+//             break :blk null;
+//         };
+//
+//         const chunk_end = next_space orelse text.len;
+//         var chunk = text[i..chunk_end];
+//
+//         if (chunk.len > remaining_space) {
+//             const line_offset = if (self.cursor.y == 0) self.identation else 0;
+//             if (wrap_first and self.cursor.x - line_offset > 0) {
+//                 try self.writer.writeByte('\n');
+//                 self.cursor.x = 0;
+//                 self.cursor.y += 1;
+//             }
+//
+//             var j = chunk.len;
+//             while (j > 0) {
+//                 const fill_len = self.winsize.x - self.cursor.x;
+//                 if (j < fill_len) {
+//                     break;
+//                 }
+//
+//                 try self.writer.writeAll(chunk[0..fill_len]);
+//                 chunk = chunk[fill_len..];
+//                 j -= fill_len;
+//
+//                 try self.writer.writeByte('\n');
+//                 self.cursor.x = 0;
+//                 self.cursor.y += 1;
+//             }
+//         }
+//
+//         try self.writer.writeAll(chunk);
+//         self.cursor.x += @intCast(chunk.len);
+//         i = chunk_end;
+//
+//         if (next_space) |_| {
+//             i += 1;
+//
+//             if (self.cursor.x < self.winsize.x) {
+//                 try self.writer.writeByte(' ');
+//                 self.cursor.x += 1;
+//             } else {
+//                 try self.writer.writeByte('\n');
+//                 self.cursor.x = 0;
+//                 self.cursor.y += 1;
+//             }
+//         }
+//     }
+// }
+
+fn writeText(self: *PromptWriter, text: []const u8) error{WriteFailed}!void {
+    if (text.len == 0) {
+        return;
+    }
+
+    var i: usize = 0;
+    while (i < text.len) {
+        const remaining_space = self.winsize.x - self.cursor.x;
+
+        const chunk_end = @min(i + remaining_space, text.len);
+        const chunk = text[i..chunk_end];
+
+        try self.writer.writeAll(chunk);
+        self.cursor.x += @intCast(chunk.len);
+        i = chunk_end;
+
+        if (i < text.len) {
+            try self.writer.writeByte('\n');
+            self.cursor.x = 0;
+            self.cursor.y += 1;
+        }
+    }
+
+    // var i: usize = 0;
+    // while (i < text.len) {
+    //     const remaining_space = self.winsize.x - self.cursor.x;
+    //
+    //     const next_space: ?usize = blk: {
+    //         var j = i;
+    //         while (j < text.len) : (j += 1) {
+    //             if (text[j] == ' ') {
+    //                 break :blk j;
+    //             }
+    //         }
+    //         break :blk null;
+    //     };
+    //
+    //     const chunk_end = next_space orelse text.len;
+    //     var chunk = text[i..chunk_end];
+    //
+    //     if (chunk.len > remaining_space) {
+    //         var j = chunk.len;
+    //         while (j > 0) {
+    //             const fill_len = self.winsize.x - self.cursor.x;
+    //             if (j < fill_len) {
+    //                 break;
+    //             }
+    //
+    //             try self.writer.writeAll(chunk[0..fill_len]);
+    //             chunk = chunk[fill_len..];
+    //             j -= fill_len;
+    //
+    //             try self.writer.writeByte('\n');
+    //             self.cursor.x = 0;
+    //             self.cursor.y += 1;
+    //         }
+    //     }
+    //
+    //     try self.writer.writeAll(chunk);
+    //     self.cursor.x += @intCast(chunk.len);
+    //     i = chunk_end;
+    //
+    //     if (next_space) |_| {
+    //         i += 1;
+    //
+    //         if (self.cursor.x < self.winsize.x) {
+    //             try self.writer.writeByte(' ');
+    //             self.cursor.x += 1;
+    //         } else {
+    //             try self.writer.writeByte('\n');
+    //             self.cursor.x = 0;
+    //             self.cursor.y += 1;
+    //         }
+    //     }
+    // }
+}
+
+pub inline fn flush(self: *PromptWriter) error{WriteFailed}!void {
+    return self.writer.flush();
+}
+
+pub fn updateWindowSize(self: *PromptWriter, new_size: Winsize) error{WriteFailed}!void {
+    self.winsize = Vec2{ .x = new_size.cols, .y = new_size.rows };
+    return self.redraw();
+}
+
+pub fn insertAtCursor(self: *PromptWriter, unit: *const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+    try self.buf.insertAtCursor(self.allocator, unit);
+    try self.redraw();
+}
+
+pub fn deleteBeforeCursor(self: *PromptWriter) error{WriteFailed}!void {
+    if (self.buf.growGapLeft(1)) {
+        try self.redraw();
+    }
+}
+
+pub fn deleteAfterCursor(self: *PromptWriter) error{WriteFailed}!void {
+    if (self.buf.growGapRight(1)) {
+        try self.redraw();
+    }
+}
+
+pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
+    if (self.buf.moveGapRight(n) catch null) |_| {
+        try common.ansi.cursor.forward(self.writer, 1);
+
+        try self.redraw();
+    }
+}
+
+pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
+    if (self.buf.moveGapLeft(n) catch null) |_| {
+        try common.ansi.cursor.backward(self.writer, 1);
+
+        try self.redraw();
+    }
+}
+
+pub fn moveCursorToEnd(self: *PromptWriter) error{WriteFailed}!void {
+    if (self.end.y - self.cursor.y > 0) {
+        try common.ansi.cursor.next_line(self.writer, self.end.y - self.cursor.y);
+    }
+    try common.ansi.cursor.to(self.writer, self.end.x, null);
+}
+
+pub fn toOwnedSlice(self: *const PromptWriter, allocator: std.mem.Allocator) error{OutOfMemory}![]const u8 {
+    var buf_len: usize = 0;
+    for (self.buf.firstHalf()) |g| {
+        buf_len += g.data.len;
+    }
+    for (self.buf.secondHalf()) |g| {
+        buf_len += g.data.len;
+    }
+
+    const first_half = self.buf.utf8.firstHalf();
+    const second_half = self.buf.utf8.secondHalf();
+
+    var buf = try allocator.alloc(u8, buf_len);
+    @memcpy(buf[0..first_half.len], first_half);
+    @memcpy(buf[first_half.len..], second_half);
+
+    return buf;
+}
+
+pub const Vec2 = struct {
+    x: u32,
+    y: u32,
+};

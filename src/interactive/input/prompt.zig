@@ -2,65 +2,27 @@ const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common");
 
-// const Grapheme = @import("event.zig").Grapheme;
+const Event = @import("event.zig").Event;
 const InputReader = @import("input_reader.zig");
+const PromptWriter = @import("prompt_writer.zig");
 
 const Prompt = @This();
 
-allocator: std.mem.Allocator,
-
 reader: *InputReader,
-writer: *std.Io.Writer,
+writer: PromptWriter,
 
-buf: common.unicode.UGF8.GapBuffer(.{}),
-cursor_dpos: usize,
+pub fn init(allocator: std.mem.Allocator, reader: *InputReader, writer: *std.Io.Writer, identation: u32) error{OutOfMemory}!Prompt {
+    const winsize = reader.getWindowSize() catch @panic("unbale to get window size");
+    const prompt_writer = PromptWriter.init(allocator, writer, identation, winsize);
 
-pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) error{OutOfMemory}!Prompt {
-    const reader = try InputReader.init(allocator);
-    reader.start() catch @panic("unable to start console reader thread");
-    
     return Prompt{
-        .allocator = allocator,
-
         .reader = reader,
-        .writer = writer,
-
-        .buf = .init,
-        .cursor_dpos = 0,
+        .writer = prompt_writer,
     };
 }
 
 pub fn deinit(self: *Prompt) void {
-    self.reader.deinit();
-    
-    self.buf.clearAndFree(self.allocator);
-}
-
-pub fn redraw(self: *Prompt) error{EchoingStateFailed}!void {
-    var dw_first: usize = 0;
-    for (self.buf.firstHalf()) |g| {
-        dw_first += g.dw;
-    }
-    var dw_second: usize = 0;
-    for (self.buf.secondHalf()) |g| {
-        dw_second += g.dw;
-    }
-
-    if (self.cursor_dpos > 0) {
-        self.writer.print("\x1b[{}D", .{self.cursor_dpos}) catch return error.EchoingStateFailed;
-    }
-    self.writer.writeAll("\x1b[0K") catch return error.EchoingStateFailed;
-    
-    self.writer.writeAll(self.buf.utf8.firstHalf()) catch return error.EchoingStateFailed;
-    self.writer.writeAll(self.buf.utf8.secondHalf()) catch return error.EchoingStateFailed;
-    
-    if (dw_second > 0) {
-        self.writer.print("\x1b[{}D", .{dw_second}) catch return error.EchoingStateFailed;
-    }
-    
-    self.writer.flush() catch return error.EchoingStateFailed;
-    
-    self.cursor_dpos = dw_first;
+    self.writer.deinit();
 }
 
 pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCanceled, CommandCanceledAndClear, EndOfInput, OutOfMemory, EchoingStateFailed }![]const u8 {
@@ -69,28 +31,24 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
 
         switch (event) {
             .grapheme => |*g| {
-                defer g.deinit(self.allocator);
-                
-                self.buf.insertAtCursor(self.allocator, g) catch |err| switch (err) {
+                defer g.deinit(self.reader.allocator);
+
+                self.writer.insertAtCursor(g) catch |err| switch (err) {
                     error.OutOfMemory => |e| return e,
+                    error.WriteFailed => return error.EchoingStateFailed,
                     else => unreachable,
                 };
-
-                try self.redraw();
             },
             .enter => {
-                self.writer.writeByte('\n') catch return error.EchoingStateFailed;
-                self.writer.flush() catch return error.EchoingStateFailed;
                 break;
             },
 
             .backspace => {
-                if (self.buf.growGapLeft(1)) {
-                    try self.redraw();
-                }
+                self.writer.deleteBeforeCursor() catch return error.EchoingStateFailed;
             },
 
             .interrupt => {
+                self.writer.moveCursorToEnd() catch return error.EchoingStateFailed;
                 return error.CommandCanceled;
             },
 
@@ -103,42 +61,24 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
             },
 
             .right => {
-                if (self.buf.moveGapRight(1) catch null) |_| {
-                    const first_half = self.buf.firstHalf();
-                    const dw = first_half[first_half.len - 1].dw;
-                    self.cursor_dpos += dw;
-
-                    self.writer.print("\x1b[{}C", .{dw}) catch return error.EchoingStateFailed;
-                    self.writer.flush() catch return error.EchoingStateFailed;
-                }
+                self.writer.moveCursorRight(1) catch return error.EchoingStateFailed;
             },
             .left => {
-                if (self.buf.moveGapLeft(1) catch null) |_| {
-                    const dw = self.buf.secondHalf()[0].dw;
-                    self.cursor_dpos -= dw;
+                self.writer.moveCursorLeft(1) catch return error.EchoingStateFailed;
+            },
 
-                    self.writer.print("\x1b[{}D", .{dw}) catch return error.EchoingStateFailed;
-                    self.writer.flush() catch return error.EchoingStateFailed;
-                }
+            .winsize => |w| {
+                self.writer.updateWindowSize(w) catch return error.EchoingStateFailed;
             },
 
             else => {
-                // std.debug.print("token ignored\n", .{});
+                // std.debug.print("prompt: event ignored: {any}\n", .{event});
             },
         }
     }
 
-    self.buf.moveGapRight(self.buf.secondHalf().len) catch unreachable;
-    
-    var buf_len: usize = 0;
-    for (self.buf.firstHalf()) |g| {
-        buf_len += g.data.len;
-    }
-    
-    var buf_writer: std.Io.Writer.Allocating = try .initCapacity(allocator, buf_len);
-    defer buf_writer.deinit();
+    self.writer.writer.writeByte('\n') catch return error.EchoingStateFailed;
+    self.writer.flush() catch return error.EchoingStateFailed;
 
-    buf_writer.writer.writeAll(self.buf.utf8.firstHalf()) catch unreachable;
-
-    return buf_writer.toOwnedSlice();
+    return self.writer.toOwnedSlice(allocator);
 }

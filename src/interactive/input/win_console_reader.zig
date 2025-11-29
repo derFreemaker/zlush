@@ -4,6 +4,7 @@ const common = @import("common");
 
 const c = @import("win_console_c.zig");
 
+const Event = @import("event.zig").Event;
 const ReadToken = @import("input_reader.zig").ReadToken;
 
 const WinConsoleReader = @This();
@@ -18,6 +19,24 @@ pub fn init() WinConsoleReader {
 
 pub fn deinit(self: *WinConsoleReader) void {
     _ = self;
+}
+
+pub fn getWindowSize(_: *const WinConsoleReader) !Event.Winsize {
+    // from: https://github.com/rockorager/libvaxis/blob/main/src/tty.zig
+    // NOTE: Even though the event comes with a size, it may not be accurate. We ask for
+    // the size directly when we get this event
+    var console_info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (windows.kernel32.GetConsoleScreenBufferInfo(std.fs.File.stdout().handle, &console_info) == 0) {
+        return windows.unexpectedError(windows.kernel32.GetLastError());
+    }
+    const window_rect = console_info.srWindow;
+    const width = window_rect.Right - window_rect.Left;
+    const height = window_rect.Bottom - window_rect.Top;
+
+    return Event.Winsize{
+        .cols = @intCast(width),
+        .rows = @intCast(height),
+    };
 }
 
 pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
@@ -121,6 +140,11 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
 
             .focus => {
                 self.tossEvent(); // ignore
+            },
+
+            .windowSize => {
+                self.tossEvent();
+                return ReadToken{ .event = .{ .winsize = self.getWindowSize() catch return error.ReadFailed } };
             },
 
             else => {

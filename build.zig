@@ -8,10 +8,16 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
+    // unicode
     const dwp_options = b.addOptions();
     dwp_options.addOption(bool, "cjk", false);
     dwp_options.addOption(?i4, "c0_width", null);
     dwp_options.addOption(?i4, "c1_width", null);
+    
+    const ansi_escape = b.dependency("ansi_escape", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("ansi-escape");
     
     const common_mod = b.addModule("common", .{
         .target = target,
@@ -25,6 +31,10 @@ pub fn build(b: *std.Build) !void {
                 .module = b.createModule(.{
                     .root_source_file = b.path("build.zig.zon"),
                 }),
+            },
+            .{
+                .name = "ansi-escape",
+                .module = ansi_escape,
             },
         },
     });

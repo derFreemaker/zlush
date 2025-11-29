@@ -14,7 +14,7 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
         cur_idx: usize,
         gap_size: usize,
 
-        pub const init = Self{
+        pub const empty = Self{
             .buf = &.{},
             .cur_idx = 0,
             .gap_size = 0,

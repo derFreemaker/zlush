@@ -2,8 +2,6 @@ const std = @import("std");
 
 pub const manifest = @import("zon");
 
-const _GapBuffer = @import("gap_buffer.zig");
-
 pub const GrowStrategie = union(enum) {
     fixed: usize,
     multiply: usize,
@@ -35,7 +33,7 @@ pub const GrowStrategie = union(enum) {
                 const new_len = c(cur_len, n);
                 if (new_len < cur_len + n) {
                     @branchHint(.cold);
-                    std.debug.panic("calculated lower length than needed: {}", .{new_len});
+                    std.debug.panic("calculated lower length '{}' than needed '{}'", .{ new_len, cur_len + n });
                 }
 
                 return new_len;
@@ -44,6 +42,7 @@ pub const GrowStrategie = union(enum) {
     }
 };
 
+const _GapBuffer = @import("gap_buffer.zig");
 pub const GapBufferConfig = _GapBuffer.GapBufferConfig;
 pub const GapBuffer = _GapBuffer.GapBuffer;
 
@@ -58,6 +57,8 @@ pub const unicode = struct {
 pub const Queue = @import("queue.zig").Queue;
 
 pub const Stopwatch = @import("stopwatch.zig");
+
+pub const ansi = @import("ansi-escape").ansi;
 
 test {
     @setEvalBranchQuota(2_000_000);

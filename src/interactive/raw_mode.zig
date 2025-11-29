@@ -20,7 +20,7 @@ pub fn enable() !void {
 
 fn enableWindows() !void {
     const input_raw_mode: win_c.CONSOLE_MODE_INPUT = .{
-        .WINDOW_INPUT = 0, // resize events
+        .WINDOW_INPUT = 1, // resize events
         .MOUSE_INPUT = 0,
         .EXTENDED_FLAGS = 0, // allow mouse events
         .PROCESSED_INPUT = 0,

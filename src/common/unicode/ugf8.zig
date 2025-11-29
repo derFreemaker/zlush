@@ -12,10 +12,10 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
     return struct {
         const Self = @This();
 
-        utf8: common.GapBuffer(u8, config.utf8) = .init,
-        units: common.GapBuffer(Unit, config.units) = .init,
+        utf8: common.GapBuffer(u8, config.utf8) = .empty,
+        units: common.GapBuffer(Unit, config.units) = .empty,
 
-        pub const init = Self{};
+        pub const empty = Self{};
 
         pub inline fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.units.deinit(allocator);
@@ -64,6 +64,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
 
             const ugf8_unit = Unit{
                 .data = self.utf8.buf[self.utf8.cur_idx - utf8_len .. self.utf8.cur_idx],
+                .codepoints_count = @intCast(unit.slice().len),
                 .dw = unit.dw,
             };
 
@@ -186,5 +187,6 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
 
 pub const Unit = struct {
     data: []const u8,
+    codepoints_count: u13,
     dw: u7,
 };
