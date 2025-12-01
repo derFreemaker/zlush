@@ -20,8 +20,8 @@ allocator: std.mem.Allocator,
 reader: ConsoleReader,
 
 // cache: GraphemeCache,
-graphemes: common.unicode.Graphemes,
-dw: common.unicode.DisplayWidth,
+graphemes: common.Unicode.Graphemes,
+dw: common.Unicode.DisplayWidth,
 
 queue: common.Queue(Event),
 
@@ -29,7 +29,7 @@ thread: ?std.Thread = null,
 should_quit: bool = false,
 
 pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!*InputReader {
-    const graphemes = try common.unicode.Graphemes.init(allocator);
+    const graphemes = try common.Unicode.Graphemes.init(allocator);
 
     const ptr = try allocator.create(InputReader);
     ptr.* = InputReader{
@@ -96,7 +96,7 @@ pub fn getWindowSize(self: *InputReader) !Event.Winsize {
 fn runReader(self: *InputReader) !void {
     if (builtin.is_test) return;
 
-    var cp_state: common.unicode.Graphemes.IterState = .{};
+    var cp_state: common.Unicode.Graphemes.IterState = .{};
     var cp_buf: [32]u21 = undefined;
     var cp_len: usize = 0;
 
@@ -120,7 +120,7 @@ fn runReader(self: *InputReader) !void {
         switch (token) {
             .cp => |cp| {
                 if (cp_len > 0) {
-                    const is_break = common.unicode.Graphemes.graphemeBreak(cp_buf[cp_len - 1], cp, &self.graphemes, &cp_state);
+                    const is_break = common.Unicode.Graphemes.graphemeBreak(cp_buf[cp_len - 1], cp, &self.graphemes, &cp_state);
                     if (is_break) {
                         const event = try self.convertCodepointsToGraphemeEvent(cp_buf[0..cp_len]);
                         cp_state = .{};
@@ -152,12 +152,12 @@ fn runReader(self: *InputReader) !void {
 fn convertCodepointsToGraphemeEvent(self: *InputReader, codepoints: []const u21) error{OutOfMemory}!Event {
     if (codepoints.len == 1) {
         const cp = codepoints[0];
-        return Event{ .grapheme = common.unicode.UGF.Unit.initSingle(cp, @intCast(self.dw.codePointWidth(cp))) };
+        return Event{ .grapheme = common.Unicode.UGF.Unit.initSingle(cp, @intCast(self.dw.codePointWidth(cp))) };
     }
 
     const dw: u7 = @intCast(self.dw.codePointsWidth(codepoints));
     return Event{
-        .grapheme = common.unicode.UGF.Unit.init(self.allocator, codepoints, dw) catch |err| switch (err) {
+        .grapheme = common.Unicode.UGF.Unit.init(self.allocator, codepoints, dw) catch |err| switch (err) {
             error.OutOfMemory => |e| return e,
             else => |e| std.debug.panic("{s}", .{@errorName(e)}),
         },

@@ -2,7 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common");
 
-const AnsiColor = @import("../utils/ansi_color.zig");
+const Zlush = @import("zlush");
+
 const RawMode = @import("raw_mode.zig");
 
 const InputReader = @import("input/input_reader.zig");
@@ -20,10 +21,12 @@ stderr: std.fs.File.Writer,
 
 reader: *InputReader,
 
+zlush: Zlush,
+
 sw: *common.Stopwatch,
 
 pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ FailedToSetRawMode, OutOfMemory }!Interactive {
-    try sw.begin("interactive initialize");
+    try sw.begin("initialize interactive");
     defer sw.end();
 
     RawMode.enable() catch return error.FailedToSetRawMode;
@@ -51,16 +54,18 @@ pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ FailedTo
 
         .reader = reader,
 
+        .zlush = try .init(allocator, sw),
+
         .sw = sw,
     };
 }
 
 pub fn deinit(self: *Interactive) void {
     self.reader.deinit();
-    
+
     self.allocator.free(self.stdout_buf);
     self.allocator.free(self.stderr_buf);
-    
+
     RawMode.disable();
 }
 
@@ -69,42 +74,44 @@ pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, Rea
     while (true) {
         defer self.stdout.interface.flush() catch @panic("unable to flush");
 
-        const command = self.promptUser(self.allocator) catch |err| switch (err) {
+        var buf = self.promptUser(self.allocator) catch |err| switch (err) {
             error.EndOfInput => return 0,
             else => |e| return e,
         };
-        defer self.allocator.free(command);
+        defer buf.deinit(self.allocator);
+        const raw_buf = buf.utf8.items;
 
-        if (std.mem.eql(u8, command, "exit")) {
+        if (std.mem.eql(u8, raw_buf, "exit")) {
             return 0;
         }
 
-        if (std.mem.eql(u8, command, "clear")) {
+        if (std.mem.eql(u8, raw_buf, "clear")) {
             try self.stdout.interface.writeAll("\x1b[2J\x1b[3J\x1b[H");
             continue;
         }
 
-        try self.stdout.interface.writeAll(command);
-        try self.stdout.interface.writeByte('\n');
+        const exit_code = try self.zlush.execute(buf);
+        try self.stdout.interface.print("exitcode: {}\n", .{exit_code});
+        try self.stdout.interface.flush();
     }
 }
 
-pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }![]const u8 {
+pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }!common.Unicode.UGF8.Buffer {
     while (true) {
         const prompt_len = 7;
         try self.stdout.interface.writeAll("zlush> ");
         try self.stdout.interface.flush();
-        
+
         var prompt = try Prompt.init(self.allocator, self.reader, &self.stdout.interface, prompt_len);
         defer prompt.deinit();
 
-        const command = prompt.readCommand(allocator) catch |err| switch (err) {
+        const buf = prompt.readCommand(allocator) catch |err| switch (err) {
             error.CommandCanceled => {
                 try self.stdout.interface.print("{f}^C{s}\n", .{
-                    AnsiColor.Coloring{
+                    common.AnsiColor.Coloring{
                         .foreground = .normal(.bright_red),
                     },
-                    comptime AnsiColor.reset(),
+                    comptime common.AnsiColor.reset(),
                 });
                 try self.stdout.interface.flush();
                 continue;
@@ -117,6 +124,6 @@ pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) error{ OutOf
             else => |e| return e,
         };
 
-        return command;
+        return buf;
     }
 }

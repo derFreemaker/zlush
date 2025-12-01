@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
 
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/zlush.zig"),
 
         .imports = &.{
             .{ .name = "common", .module = common_mod },

@@ -127,7 +127,7 @@ pub fn codePointsWidth(dw: DisplayWidth, codepoints: []const u21) i4 {
             }
         }
     }
-    
+
     return gw;
 }
 

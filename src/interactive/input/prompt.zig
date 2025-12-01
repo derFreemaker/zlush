@@ -25,7 +25,7 @@ pub fn deinit(self: *Prompt) void {
     self.writer.deinit();
 }
 
-pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCanceled, CommandCanceledAndClear, EndOfInput, OutOfMemory, EchoingStateFailed }![]const u8 {
+pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCanceled, CommandCanceledAndClear, EndOfInput, OutOfMemory, EchoingStateFailed }!common.Unicode.UGF8.Buffer {
     while (true) {
         var event = self.reader.nextEvent();
 
@@ -80,5 +80,5 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
     self.writer.writer.writeByte('\n') catch return error.EchoingStateFailed;
     self.writer.flush() catch return error.EchoingStateFailed;
 
-    return self.writer.toOwnedSlice(allocator);
+    return self.writer.buf.toBuffer(allocator);
 }

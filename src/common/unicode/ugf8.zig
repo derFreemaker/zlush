@@ -3,6 +3,118 @@ const common = @import("../common.zig");
 
 const UGF = @import("ugf.zig");
 
+const UGF8 = @This();
+
+pub const Buffer = struct {
+    utf8: std.ArrayList(u8),
+    units: std.ArrayList(Buffer.Item),
+
+    pub const empty = Buffer{
+        .utf8 = .empty,
+        .units = .empty,
+    };
+    
+    pub inline fn deinit(self: *Buffer, allocator: std.mem.Allocator) void {
+        self.units.deinit(allocator);
+        self.utf8.deinit(allocator);
+    }
+
+    pub fn append(self: *Buffer, allocator: std.mem.Allocator, item: UGF8.Unit) error{OutOfMemory}!void {
+        try self.utf8.appendSlice(allocator, item.data);
+        const buf_unit = Buffer.Item{
+            .start = self.utf8.items.len - item.data,
+            .end = self.utf8.items.len,
+
+            .codepoints_count = item.codepoints_count,
+            .dw = item.dw,
+        };
+
+        try self.units.append(allocator, buf_unit);
+    }
+
+    pub fn appendAssumeCapacity(self: *Buffer, item: UGF8.Unit) void {
+        self.utf8.appendSliceAssumeCapacity(item.data);
+        const buf_unit = Buffer.Item{
+            .start = self.utf8.items.len - item.data.len,
+            .end = self.utf8.items.len,
+
+            .codepoints_count = item.codepoints_count,
+            .dw = item.dw,
+        };
+
+        self.units.appendAssumeCapacity(buf_unit);
+    }
+
+    pub fn appendSlice(self: *Buffer, allocator: std.mem.Allocator, slice: []const UGF8.Unit) error{OutOfMemory}!void {
+        const utf8_len = blk: {
+            var utf8_len: usize = 0;
+            for (slice) |item| {
+                utf8_len += item.data.len;
+            }
+            break :blk utf8_len;
+        };
+        try self.utf8.ensureUnusedCapacity(allocator, utf8_len);
+        try self.units.ensureUnusedCapacity(allocator, slice.len);
+
+        self.appendSliceAssumeCapacity(slice);
+    }
+
+    pub fn appendSliceAssumeCapacity(self: *Buffer, slice: []const UGF8.Unit) void {
+        for (slice) |item| {
+            self.appendAssumeCapacity(item);
+        }
+    }
+
+    pub fn pop(self: *Buffer) void {
+        const unit = self.units.pop() orelse return;
+        self.utf8.items.len -= unit.len();
+    }
+
+    pub fn popOwned(self: *Buffer, allocator: std.mem.Allocator) error{OutOfMemory}!?UGF8.Unit {
+        const unit = self.units.pop() orelse return null;
+
+        const owned = try unit.toOwnedUnit(self, allocator);
+        self.utf8.items.len -= owned.data.len;
+    }
+
+    pub const Item = struct {
+        start: usize,
+        end: usize,
+
+        codepoints_count: u13,
+        dw: u7,
+
+        pub inline fn len(self: *const Buffer.Item) usize {
+            return self.end - self.start;
+        }
+
+        pub inline fn data(self: *const Buffer.Item, buffer: *const Buffer) []const u8 {
+            return buffer.utf8.items[self.start..self.end];
+        }
+
+        pub inline fn toUnit(self: *const Buffer.Item, buffer: *const Buffer) UGF8.Unit {
+            return UGF8.Unit{
+                .data = buffer.utf8.items[self.start..self.end],
+                .codepoints_count = self.codepoints_count,
+                .dw = self.dw,
+            };
+        }
+
+        pub fn toOwnedUnit(self: *const Buffer.Item, buffer: *const Buffer, allocator: std.mem.Allocator) error{OutOfMemory}!UGF8.Unit {
+            const buf = try allocator.alloc(u8, self.end - self.start);
+            @memcpy(buf, buffer.utf8.items[self.start..self.end]);
+
+            return UGF8.Unit{
+                .data = buf,
+                .codepoints_count = self.codepoints_count,
+                .dw = self.dw,
+            };
+        }
+    };
+};
+
+//TODO: rework implementation of gap buffer, since the pointer in the units don't get updated it's a wonder it works
+
 pub const GapBufferConfig = struct {
     utf8: common.GapBufferConfig = .{},
     units: common.GapBufferConfig = .{},
@@ -58,7 +170,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             for (unit.slice()) |cp| {
                 var buf: [4]u8 = undefined;
                 const cp_utf8_len = try std.unicode.utf8Encode(cp, &buf);
-                
+
                 self.utf8.insertSliceAtCursorAssumeCapacity(buf[0..cp_utf8_len]);
             }
 
@@ -132,7 +244,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             }
 
             const removed_units: []const Unit = self.units.firstHalf()[self.units.firstHalf().len - n .. self.units.firstHalf().len];
-            
+
             var utf8_len: usize = 0;
             for (removed_units) |unit| {
                 utf8_len += unit.data.len;
@@ -182,6 +294,18 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
         pub inline fn len(self: *const Self) usize {
             return self.units.len();
         }
+
+        pub fn toBuffer(self: *const Self, allocator: std.mem.Allocator) error{OutOfMemory}!Buffer {
+            var buf: Buffer = .empty;
+
+            try buf.utf8.ensureUnusedCapacity(allocator, self.utf8.len());
+            try buf.units.ensureUnusedCapacity(allocator, self.units.len());
+
+            buf.appendSliceAssumeCapacity(self.firstHalf());
+            buf.appendSliceAssumeCapacity(self.secondHalf());
+
+            return buf;
+        }
     };
 }
 
@@ -189,4 +313,19 @@ pub const Unit = struct {
     data: []const u8,
     codepoints_count: u13,
     dw: u7,
+
+    pub inline fn deinit(self: *const Unit, allocator: std.mem.Allocator) void {
+        allocator.free(self.data);
+    }
+
+    pub inline fn match(self: *const Unit, data: []const u8) bool {
+        return std.mem.eql(u8, self.data, data);
+    }
+
+    pub inline fn matchChr(self: *const Unit, chr: u8) bool {
+        if (self.data.len != 1) {
+            return false;
+        }
+        return self.data[0] == chr;
+    }
 };

@@ -46,7 +46,7 @@ const _GapBuffer = @import("gap_buffer.zig");
 pub const GapBufferConfig = _GapBuffer.GapBufferConfig;
 pub const GapBuffer = _GapBuffer.GapBuffer;
 
-pub const unicode = struct {
+pub const Unicode = struct {
     pub const Graphemes = @import("unicode/graphemes.zig");
     pub const DisplayWidth = @import("unicode/display_width.zig");
 
@@ -58,7 +58,9 @@ pub const Queue = @import("queue.zig").Queue;
 
 pub const Stopwatch = @import("stopwatch.zig");
 
-pub const ansi = @import("ansi-escape").ansi;
+pub const Ansi = @import("ansi-escape").ansi;
+pub const AnsiColor = @import("ansi_color.zig");
+pub const ListSeperator = @import("list_seperator.zig");
 
 test {
     @setEvalBranchQuota(2_000_000);
