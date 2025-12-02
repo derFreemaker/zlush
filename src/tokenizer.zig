@@ -86,7 +86,7 @@ pub fn next(self: *Tokenizer) ?[]const u8 {
     }
 }
 
-inline fn peek(self: *Tokenizer, n: usize) ?UGF8.Buffer.Item {
+inline fn peek(self: *Tokenizer, n: usize) ?UGF8.Buffer.Unit {
     if (self.cursor + n >= self.source.units.items.len) {
         return null;
     }

@@ -57,6 +57,10 @@ pub const Unit = struct {
         self.data.deinit(allocator);
     }
 
+    pub inline fn len(self: *const Unit) u13 {
+        return self.data.len();
+    }
+
     pub inline fn slice(self: *const Unit) []const u21 {
         return self.data.slice();
     }
@@ -74,15 +78,18 @@ pub const Unit = struct {
             }
         }
 
+        pub inline fn len(self: *const UnitData) u13 {
+            return switch (self.*) {
+                .single => 1,
+                .multiple => |m| m.len,
+            };
+        }
+
         pub inline fn slice(self: *const UnitData) []const u21 {
-            switch (self.*) {
-                .single => |*s| {
-                    return @as([*]const u21, @ptrCast(s))[0..1];
-                },
-                .multiple => |m| {
-                    return m.slice();
-                },
-            }
+            return switch (self.*) {
+                .single => |*s| @as([*]const u21, @ptrCast(s))[0..1],
+                .multiple => |m| m.slice(),
+            };
         }
 
         pub const Multiple = struct {

@@ -1,8 +1,11 @@
 const std = @import("std");
 const common = @import("common");
 const UGF = common.Unicode.UGF;
+const UGF8 = common.Unicode.UGF8;
 
 const Winsize = @import("event.zig").Event.Winsize;
+
+const GapBuffer = UGF8.GapBuffer(.{});
 
 const PromptWriter = @This();
 
@@ -12,7 +15,7 @@ writer: *std.Io.Writer,
 identation: u32,
 winsize: Vec2,
 
-buf: common.Unicode.UGF8.GapBuffer(.{}),
+buf: GapBuffer,
 cursor: Vec2,
 end: Vec2,
 
@@ -68,10 +71,10 @@ pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
         return;
     }
 
-    try self.writeText(self.buf.utf8.firstHalf());
+    try self.writeText(self.buf.units.firstHalf(), self.buf.utf8.firstHalf());
     const cursor_edit_pos = self.cursor;
 
-    try self.writeText(self.buf.utf8.secondHalf());
+    try self.writeText(self.buf.units.secondHalf(), self.buf.utf8.secondHalf());
     self.end = self.cursor;
 
     if (self.end.y > cursor_edit_pos.y) {
@@ -83,23 +86,38 @@ pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
 }
 
 //TODO: rewrite this to use the dw of the grapheme in order to increment the cursor position
-fn writeText(self: *PromptWriter, text: []const u8) error{WriteFailed}!void {
-    if (text.len == 0) {
+fn writeText(self: *PromptWriter, units: []const GapBuffer.Unit, utf8: []const u8) error{WriteFailed}!void {
+    if (utf8.len == 0) {
         return;
     }
 
+    var last: usize = 0;
     var i: usize = 0;
-    while (i < text.len) {
+    while (i < units.len) {
         const remaining_space = self.winsize.x - self.cursor.x;
 
-        const chunk_end = @min(i + remaining_space, text.len);
-        const chunk = text[i..chunk_end];
+        const utf8_len = blk: {
+            var utf8_len: usize = 0;
+            var dw_len: u32 = 0;
+            while (i < units.len) : (i += 1) {
+                const unit = units[i];
+                if (remaining_space < dw_len + unit.dw) {
+                    break;
+                }
+                dw_len += unit.dw;
+                utf8_len += unit.len;
+            }
+
+            self.cursor.x += dw_len;
+            break :blk utf8_len;
+        };
+
+        const chunk = utf8[last .. last + utf8_len];
+        last += utf8_len;
 
         try self.writer.writeAll(chunk);
-        self.cursor.x += @intCast(chunk.len);
-        i = chunk_end;
 
-        if (i < text.len) {
+        if (i < units.len) {
             try self.writer.writeByte('\n');
             self.cursor.x = 0;
             self.cursor.y += 1;
