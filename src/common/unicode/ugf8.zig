@@ -207,7 +207,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             }
         }
 
-        pub fn moveGapLeft(self: *Self, n: usize) error{UnableToMoveGap}!void {
+        pub fn moveGapLeft(self: *Self, n: usize) error{UnableToMoveGap}![]const Self.Unit {
             const moved_units = try self.units.moveGapLeft(n);
 
             var utf8_len: usize = 0;
@@ -217,9 +217,11 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             }
 
             _ = self.utf8.moveGapLeft(utf8_len) catch unreachable;
+
+            return moved_units;
         }
 
-        pub fn moveGapRight(self: *Self, n: usize) error{UnableToMoveGap}!void {
+        pub fn moveGapRight(self: *Self, n: usize) error{UnableToMoveGap}![]const Self.Unit {
             const moved_units = try self.units.moveGapRight(n);
 
             var utf8_len: usize = 0;
@@ -229,6 +231,8 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             }
 
             _ = self.utf8.moveGapRight(utf8_len) catch unreachable;
+
+            return moved_units;
         }
 
         pub fn growGapLeft(self: *Self, n: usize) bool {
@@ -362,16 +366,16 @@ pub const Unit = struct {
 // pub const Encoder = struct {
 //     graphemes: common.Unicode.Graphemes,
 //     dw: common.Unicode.DisplayWidth,
-// 
+//
 //     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Encoder {
 //         const graphemes = try common.Unicode.Graphemes.init(allocator);
-//         
+//
 //         return Encoder{
 //             .graphemes = graphemes,
 //             .dw = try .initWithGraphemes(allocator, graphemes),
 //         };
 //     }
-// 
+//
 //     pub fn deinit(self: *Encoder, allocator: std.mem.Allocator) void {
 //         self.graphemes.deinit(allocator);
 //         self.dw.deinit(allocator);

@@ -85,7 +85,6 @@ pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
     self.cursor = cursor_edit_pos;
 }
 
-//TODO: rewrite this to use the dw of the grapheme in order to increment the cursor position
 fn writeText(self: *PromptWriter, units: []const GapBuffer.Unit, utf8: []const u8) error{WriteFailed}!void {
     if (utf8.len == 0) {
         return;
@@ -152,18 +151,40 @@ pub fn deleteAfterCursor(self: *PromptWriter) error{WriteFailed}!void {
 }
 
 pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
-    if (self.buf.moveGapRight(n) catch null) |_| {
-        try common.Ansi.cursor.forward(self.writer, 1);
+    if (@as(?[]const GapBuffer.Unit, self.buf.moveGapRight(n) catch null)) |moved_units| {
+        var moved_len: u32 = 0;
+        for (moved_units) |unit| {
+            moved_len += unit.dw;
+        }
 
-        try self.redraw();
+        if (self.cursor.x + moved_len > self.winsize.x) {
+            try self.redraw();
+            return;
+        }
+
+        try common.Ansi.cursor.forward(self.writer, moved_len);
+        try self.writer.flush();
     }
 }
 
 pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
-    if (self.buf.moveGapLeft(n) catch null) |_| {
-        try common.Ansi.cursor.backward(self.writer, 1);
+    if (@as(?[]const GapBuffer.Unit, self.buf.moveGapLeft(n) catch null)) |moved_units| {
+        if (self.cursor.x == 0 or (self.cursor.y == 0 and self.cursor.x == self.identation)) {
+            try self.redraw();
+            return;
+        }
 
-        try self.redraw();
+        var moved_len: u32 = 0;
+        for (moved_units) |unit| {
+            moved_len += unit.dw;
+        }
+        if (self.cursor.x < moved_len) {
+            try self.redraw();
+            return;
+        }
+
+        try common.Ansi.cursor.backward(self.writer, moved_len);
+        try self.writer.flush();
     }
 }
 
