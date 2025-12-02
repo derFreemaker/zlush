@@ -318,7 +318,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
 
             pub inline fn toUnit(self: *const Self.Unit, buffer: *const Self) UGF8.Unit {
                 return UGF8.Unit{
-                    .data = buffer.utf8.buf[self.start..self.start + self.len],
+                    .data = buffer.utf8.buf[self.start .. self.start + self.len],
                     .codepoints_count = self.codepoints_count,
                     .dw = self.dw,
                 };
@@ -358,3 +358,22 @@ pub const Unit = struct {
         return self.data[0] == chr;
     }
 };
+
+// pub const Encoder = struct {
+//     graphemes: common.Unicode.Graphemes,
+//     dw: common.Unicode.DisplayWidth,
+// 
+//     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Encoder {
+//         const graphemes = try common.Unicode.Graphemes.init(allocator);
+//         
+//         return Encoder{
+//             .graphemes = graphemes,
+//             .dw = try .initWithGraphemes(allocator, graphemes),
+//         };
+//     }
+// 
+//     pub fn deinit(self: *Encoder, allocator: std.mem.Allocator) void {
+//         self.graphemes.deinit(allocator);
+//         self.dw.deinit(allocator);
+//     }
+// };
