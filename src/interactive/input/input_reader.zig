@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common");
 
-const GraphemeCache = @import("grapheme_cache.zig");
 const Event = @import("event.zig").Event;
 
 const ConsoleReader =
@@ -19,7 +18,6 @@ allocator: std.mem.Allocator,
 
 reader: ConsoleReader,
 
-// cache: GraphemeCache,
 graphemes: common.Unicode.Graphemes,
 dw: common.Unicode.DisplayWidth,
 
@@ -37,7 +35,6 @@ pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!*InputReader {
 
         .reader = ConsoleReader.init(),
 
-        // .cache = try .init(allocator),
         .graphemes = graphemes,
         .dw = try .initWithGraphemes(allocator, graphemes),
 
@@ -54,7 +51,6 @@ pub fn deinit(self: *InputReader) void {
 
     self.reader.deinit();
 
-    // self.cache.deinit(self.allocator);
     self.dw.deinit(self.allocator);
     self.graphemes.deinit(self.allocator);
 
@@ -114,6 +110,7 @@ fn runReader(self: *InputReader) !void {
                 self.postEvent(event);
             }
 
+            std.Thread.sleep(50 * std.time.ns_per_ms);
             continue;
         };
 

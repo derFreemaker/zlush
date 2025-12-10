@@ -75,6 +75,8 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
                 // std.debug.print("prompt: event ignored: {any}\n", .{event});
             },
         }
+        
+        self.writer.flush() catch return error.EchoingStateFailed;
     }
 
     self.writer.writer.writeByte('\n') catch return error.EchoingStateFailed;

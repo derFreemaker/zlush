@@ -1,15 +1,16 @@
 const std = @import("std");
 const windows = std.os.windows;
-const common = @import("common");
+const zigwin = @import("zigwin");
+const winconsole = zigwin.system.console;
 
-const c = @import("win_console_c.zig");
+const common = @import("common");
 
 const Event = @import("event.zig").Event;
 const ReadToken = @import("input_reader.zig").ReadToken;
 
 const WinConsoleReader = @This();
 
-events: [32]c.InputRecord = undefined,
+events: [32]InputRecord = undefined,
 events_count: usize = 0,
 events_pos: usize = 0,
 
@@ -25,8 +26,8 @@ pub fn getWindowSize(_: *const WinConsoleReader) !Event.Winsize {
     // from: https://github.com/rockorager/libvaxis/blob/main/src/tty.zig
     // NOTE: Even though the event comes with a size, it may not be accurate. We ask for
     // the size directly when we get this event
-    var console_info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (windows.kernel32.GetConsoleScreenBufferInfo(std.fs.File.stdout().handle, &console_info) == 0) {
+    var console_info: winconsole.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (winconsole.GetConsoleScreenBufferInfo(std.fs.File.stdout().handle, &console_info) == 0) {
         return windows.unexpectedError(windows.kernel32.GetLastError());
     }
     const window_rect = console_info.srWindow;
@@ -109,8 +110,8 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
                     // characters (a-z) keys
                     0x41...0x5a => |key| {
                         const ctrl_pressed =
-                            ((key_event.dwControlKeyState & c.left_ctrl_pressed) == c.left_ctrl_pressed) or
-                            ((key_event.dwControlKeyState & c.right_ctrl_pressed) == c.right_ctrl_pressed);
+                            ((key_event.dwControlKeyState & winconsole.LEFT_CTRL_PRESSED) == winconsole.LEFT_CTRL_PRESSED) or
+                            ((key_event.dwControlKeyState & winconsole.RIGHT_CTRL_PRESSED) == winconsole.RIGHT_CTRL_PRESSED);
 
                         if (!ctrl_pressed) {
                             // return ReadToken{ .event = .{ .grapheme = .{ .single = .{
@@ -144,6 +145,10 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
 
             .windowSize => {
                 self.tossEvent();
+
+                // from: https://github.com/rockorager/libvaxis/blob/main/src/tty.zig
+                // NOTE: Even though the event comes with a size, it may not be accurate. We ask for
+                // the size directly when we get this event
                 return ReadToken{ .event = .{ .winsize = self.getWindowSize() catch return error.ReadFailed } };
             },
 
@@ -159,7 +164,7 @@ pub fn nextToken(self: *WinConsoleReader) error{ReadFailed}!?ReadToken {
     }
 }
 
-fn getCodepoint(self: *WinConsoleReader, event: c.KEY_EVENT_RECORD) error{ReadFailed}!u21 {
+fn getCodepoint(self: *WinConsoleReader, event: winconsole.KEY_EVENT_RECORD) error{ReadFailed}!u21 {
     if (std.unicode.utf16IsHighSurrogate(event.uChar.UnicodeChar)) {
         // we assume there is another key event completing this one
         const completing_event = try self.peekEvent();
@@ -177,7 +182,7 @@ fn getCodepoint(self: *WinConsoleReader, event: c.KEY_EVENT_RECORD) error{ReadFa
     return event.uChar.UnicodeChar;
 }
 
-fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!?c.InputRecord {
+fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!?InputRecord {
     if (self.events_pos >= self.events_count) {
         self.readNextEvents() catch |err| switch (err) {
             error.Unexpected => return error.ReadFailed,
@@ -187,7 +192,9 @@ fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!?c.InputRecord {
         }
     }
 
-    return self.events[self.events_pos];
+    const event = self.events[self.events_pos];
+    std.debug.print("event: {}\n", .{event});
+    return event;
 }
 
 inline fn tossEvent(self: *WinConsoleReader) void {
@@ -206,7 +213,7 @@ fn readNextEvents(self: *WinConsoleReader) error{Unexpected}!void {
     const stdin_handle = std.fs.File.stdin().handle;
 
     var numEvents: u32 = 0;
-    if (c.GetNumberOfConsoleInputEvents(stdin_handle, &numEvents) == 0) {
+    if (winconsole.GetNumberOfConsoleInputEvents(stdin_handle, &numEvents) == 0) {
         return windows.unexpectedError(windows.kernel32.GetLastError());
     }
     if (numEvents == 0) {
@@ -214,14 +221,14 @@ fn readNextEvents(self: *WinConsoleReader) error{Unexpected}!void {
     }
     const events_to_read = @min(numEvents, 32);
 
-    var buf: [32]c.INPUT_RECORD = undefined;
-    if (c.ReadConsoleInputW(stdin_handle, &buf, events_to_read, &numEvents) == 0) {
+    var buf: [32]winconsole.INPUT_RECORD = undefined;
+    if (winconsole.ReadConsoleInputW(stdin_handle, &buf, events_to_read, &numEvents) == 0) {
         return windows.unexpectedError(windows.kernel32.GetLastError());
     }
 
     var i: usize = 0;
     for (buf[0..numEvents]) |event| {
-        const transform = c.InputRecord.from(event);
+        const transform = InputRecord.from(event);
 
         // we filter out any release keys since there is no use for them
         if (transform == .key and transform.key.bKeyDown == 0) {
@@ -234,3 +241,40 @@ fn readNextEvents(self: *WinConsoleReader) error{Unexpected}!void {
 
     self.events_count = i;
 }
+
+pub const InputRecordType = enum(windows.WORD) {
+    key = 0x0001,
+    mouse = 0x0002,
+    windowSize = 0x0004,
+    menu = 0x0008,
+    focus = 0x0010,
+};
+
+pub const InputRecord = union(InputRecordType) {
+    key: winconsole.KEY_EVENT_RECORD,
+    mouse: winconsole.MOUSE_EVENT_RECORD,
+    windowSize: winconsole.WINDOW_BUFFER_SIZE_RECORD,
+    /// used internally and should be ignored
+    menu: winconsole.MENU_EVENT_RECORD,
+    focus: winconsole.FOCUS_EVENT_RECORD,
+
+    pub fn from(record: winconsole.INPUT_RECORD) InputRecord {
+        switch (@as(InputRecordType, @enumFromInt(record.EventType))) {
+            InputRecordType.key => {
+                return .{ .key = record.Event.KeyEvent };
+            },
+            InputRecordType.mouse => {
+                return .{ .mouse = record.Event.MouseEvent };
+            },
+            InputRecordType.windowSize => {
+                return .{ .windowSize = record.Event.WindowBufferSizeEvent };
+            },
+            InputRecordType.menu => {
+                return .{ .menu = record.Event.MenuEvent };
+            },
+            InputRecordType.focus => {
+                return .{ .focus = record.Event.FocusEvent };
+            },
+        }
+    }
+};

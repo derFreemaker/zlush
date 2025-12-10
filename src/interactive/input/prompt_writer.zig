@@ -40,7 +40,6 @@ pub fn deinit(self: *PromptWriter) void {
 pub fn redraw(self: *PromptWriter) error{WriteFailed}!void {
     try self.reset();
     try self.draw();
-    try self.flush();
 }
 
 pub fn reset(self: *PromptWriter) error{WriteFailed}!void {
@@ -163,7 +162,6 @@ pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
         }
 
         try common.Ansi.cursor.forward(self.writer, moved_len);
-        try self.writer.flush();
     }
 }
 
@@ -184,7 +182,6 @@ pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
         }
 
         try common.Ansi.cursor.backward(self.writer, moved_len);
-        try self.writer.flush();
     }
 }
 

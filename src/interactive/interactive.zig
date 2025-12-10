@@ -90,8 +90,10 @@ pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, Rea
             continue;
         }
 
-        const exit_code = try self.zlush.execute(buf);
-        try self.stdout.interface.print("exitcode: {}\n", .{exit_code});
+        try self.stdout.interface.writeAll(buf.utf8.items);
+        try self.stdout.interface.writeByte('\n');
+        // const exit_code = try self.zlush.execute(buf);
+        // try self.stdout.interface.print("exitcode: {}\n", .{exit_code});
         try self.stdout.interface.flush();
     }
 }

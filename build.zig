@@ -13,12 +13,14 @@ pub fn build(b: *std.Build) !void {
     dwp_options.addOption(bool, "cjk", false);
     dwp_options.addOption(?i4, "c0_width", null);
     dwp_options.addOption(?i4, "c1_width", null);
-    
+
     const ansi_escape = b.dependency("ansi_escape", .{
         .target = target,
         .optimize = optimize,
     }).module("ansi-escape");
-    
+
+    const zigwin = b.dependency("zigwin32", .{}).module("win32");
+
     const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
@@ -32,16 +34,14 @@ pub fn build(b: *std.Build) !void {
                     .root_source_file = b.path("build.zig.zon"),
                 }),
             },
-            .{
-                .name = "ansi-escape",
-                .module = ansi_escape,
-            },
+            .{ .name = "zigwin", .module = zigwin },
+            .{ .name = "ansi-escape", .module = ansi_escape },
         },
     });
     common_mod.addOptions("dwp_options", dwp_options);
     common_mod.addAnonymousImport("gbp", .{ .root_source_file = unicode_build.buildGBPTables(b) });
     common_mod.addAnonymousImport("dwp", .{ .root_source_file = unicode_build.buildDWPTables(b, dwp_options) });
-    
+
     const zlush_mod = b.addModule("zlush", .{
         .target = target,
         .optimize = optimize,
@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) !void {
 
         .imports = &.{
             .{ .name = "common", .module = common_mod },
+            .{ .name = "zigwin", .module = zigwin },
         },
     });
 
@@ -65,6 +66,7 @@ pub fn build(b: *std.Build) !void {
 
             .imports = &.{
                 .{ .name = "common", .module = common_mod },
+                .{ .name = "zigwin", .module = zigwin },
 
                 .{ .name = "zlush", .module = zlush_mod },
             },
