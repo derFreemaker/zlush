@@ -66,9 +66,9 @@ pub const Color = union(enum) {
         }
     }
 
-    pub fn print(self: Color, buf: []u8, layer: TextLayer) []const u8 {
+    pub fn print(self: Color, buf: []u8, layer: TextLayer) error{NoSpaceLeft}![]const u8 {
         std.debug.assert(buf.len >= 3);
-        return std.fmt.bufPrint(buf, CSI ++ "{d}m", .{self.printArg(layer, buf[3..])});
+        return std.fmt.bufPrint(buf, CSI ++ "{s}m", .{self.printArg(buf[3..], layer)});
     }
 
     pub const Colors8 = enum(u7) {

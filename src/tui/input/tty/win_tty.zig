@@ -20,7 +20,7 @@ events: [32]winconsole.INPUT_RECORD = undefined,
 events_count: usize = 0,
 events_pos: usize = 0,
 
-last_mouse_button_press: u16,
+last_mouse_button_press: u16 = 0,
 
 pub fn init(stdin: std.fs.File.Handle, stdout: std.fs.File.Handle) WinTty {
     RawMode.enable(stdin, stdout) catch @panic("unable to initialize tty");
@@ -31,6 +31,10 @@ pub fn init(stdin: std.fs.File.Handle, stdout: std.fs.File.Handle) WinTty {
     };
 }
 
+pub fn deinit(_: *WinTty) void {
+    RawMode.disable();
+}
+
 pub fn getWindowSize(stdout_handle: std.fs.File.Handle) error{Unexpected}!Winsize {
     // NOTE: Even though the event comes with a size, it may not be accurate. We ask for
     // the size directly when we get this event
@@ -39,8 +43,8 @@ pub fn getWindowSize(stdout_handle: std.fs.File.Handle) error{Unexpected}!Winsiz
         return windows.unexpectedError(windows.kernel32.GetLastError());
     }
     const window_rect = console_info.srWindow;
-    const width = window_rect.Right - window_rect.Left + 1;
-    const height = window_rect.Bottom - window_rect.Top + 1;
+    const width = window_rect.Right - window_rect.Left;
+    const height = window_rect.Bottom - window_rect.Top;
 
     return Winsize{
         .cols = @intCast(width),
@@ -56,6 +60,8 @@ pub fn nextToken(self: *WinTty) error{ReadFailed}!?TtyToken {
 
     while (true) {
         const record = try self.peekEvent() orelse return null;
+        self.tossEvent();
+
         switch (record.EventType) {
             winconsole.KEY_EVENT => {
                 const event = record.Event.KeyEvent;
@@ -192,14 +198,17 @@ pub fn nextToken(self: *WinTty) error{ReadFailed}!?TtyToken {
                 }
 
                 var codepoint: u21 = base_layout;
+                var is_char: bool = false;
                 if (event.uChar.UnicodeChar > 0x1F) {
                     codepoint = event.uChar.UnicodeChar;
+                    is_char = true;
                 }
 
                 const key = Key{
                     .codepoint = codepoint,
                     .base_layout_codepoint = base_layout,
                     .mods = translateMods(event.dwControlKeyState),
+                    .is_char = is_char,
                 };
 
                 switch (event.bKeyDown) {
@@ -303,8 +312,8 @@ pub fn nextToken(self: *WinTty) error{ReadFailed}!?TtyToken {
             },
             winconsole.FOCUS_EVENT => {
                 switch (record.Event.FocusEvent.bSetFocus) {
-                    0 => return TtyToken{ .event = .{.focus_out} },
-                    else => return TtyToken{ .event = .{.focus_in} },
+                    0 => return TtyToken{ .event = .focus_out },
+                    else => return TtyToken{ .event = .focus_in },
                 }
             },
             else => {

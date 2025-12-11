@@ -22,7 +22,7 @@ pub const Buffer = struct {
     pub fn append(self: *Buffer, allocator: std.mem.Allocator, item: UGF8.Unit) error{OutOfMemory}!void {
         try self.utf8.appendSlice(allocator, item.data);
         const buf_unit = Buffer.Unit{
-            .start = self.utf8.items.len - item.data,
+            .start = self.utf8.items.len - item.data.len,
             .end = self.utf8.items.len,
 
             .codepoints_count = item.codepoints_count,
@@ -73,8 +73,19 @@ pub const Buffer = struct {
     pub fn popOwned(self: *Buffer, allocator: std.mem.Allocator) error{OutOfMemory}!?UGF8.Unit {
         const unit = self.units.pop() orelse return null;
 
-        const owned = try unit.toOwnedUnit(self, allocator);
+        const owned = try unit.toOwnedUGF8(self, allocator);
         self.utf8.items.len -= owned.data.len;
+        
+        return owned;
+    }
+
+    pub fn asUGF8Slice(self: *Buffer, allocator: std.mem.Allocator) error{OutOfMemory}![]const UGF8.Unit {
+        var buf = try allocator.alloc(UGF8.Unit, self.units.items.len);
+        for (self.units.items, 0..) |unit, i| {
+            buf[i] = unit.asUGF8(self);
+        }
+
+        return buf;
     }
 
     pub const Unit = struct {
@@ -92,7 +103,7 @@ pub const Buffer = struct {
             return buffer.utf8.items[self.start..self.end];
         }
 
-        pub inline fn toUnit(self: *const Buffer.Unit, buffer: *const Buffer) UGF8.Unit {
+        pub inline fn asUGF8(self: *const Buffer.Unit, buffer: *const Buffer) UGF8.Unit {
             return UGF8.Unit{
                 .data = buffer.utf8.items[self.start..self.end],
                 .codepoints_count = self.codepoints_count,
@@ -100,7 +111,7 @@ pub const Buffer = struct {
             };
         }
 
-        pub fn toOwnedUnit(self: *const Buffer.Unit, buffer: *const Buffer, allocator: std.mem.Allocator) error{OutOfMemory}!UGF8.Unit {
+        pub fn toOwnedUGF8(self: *const Buffer.Unit, buffer: *const Buffer, allocator: std.mem.Allocator) error{OutOfMemory}!UGF8.Unit {
             const buf = try allocator.alloc(u8, self.end - self.start);
             @memcpy(buf, buffer.utf8.items[self.start..self.end]);
 
@@ -140,7 +151,68 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             return self.units.secondHalf();
         }
 
-        pub fn insertAtCursor(self: *Self, allocator: std.mem.Allocator, unit: *const UGF.Unit) error{ OutOfMemory, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+        pub fn insertUGF8AtCursor(self: *Self, allocator: std.mem.Allocator, unit: *const UGF8.Unit) error{OutOfMemory}!void {
+            if (self.utf8.gap_size < unit.data.len) {
+                @branchHint(.unlikely);
+                try self.utf8.grow(allocator, unit.data.len);
+            }
+
+            if (self.units.gap_size < 1) {
+                @branchHint(.unlikely);
+                try self.units.grow(allocator, 1);
+            }
+ 
+            return insertUGF8AtCursorAssumeCapacity(self, unit);
+        }
+
+        pub fn insertUGF8AtCursorAssumeCapacity(self: *Self, unit: *const UGF8.Unit) void {
+            self.utf8.insertSliceAtCursorAssumeCapacity(unit.data);
+
+            const ugf8_unit = Self.Unit{
+                .start = self.utf8.cur_idx - unit.data.len,
+                .len = unit.data.len,
+                .codepoints_count = unit.codepoints_count,
+                .dw = unit.dw,
+            };
+
+            self.units.insertAtCursorAssumeCapacity(ugf8_unit);
+        }
+        
+        pub fn insertUGF8SliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF8.Unit) error{OutOfMemory}!void {
+            var utf8_len: usize = 0;
+            for (slice) |unit| {
+                utf8_len += unit.data.len;
+            }
+            
+            if (self.utf8.gap_size < utf8_len) {
+                @branchHint(.unlikely);
+                try self.utf8.grow(allocator, utf8_len);
+            }
+
+            if (self.units.gap_size < slice.len) {
+                @branchHint(.unlikely);
+                try self.units.grow(allocator, slice.len);
+            }
+            
+            self.insertUGF8SliceAtCursorAssumeCapacity(slice);
+        }
+        
+        pub fn insertUGF8SliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF8.Unit) void {
+            for (slice) |unit| {
+                self.utf8.insertSliceAtCursorAssumeCapacity(unit.data);
+
+                const buf_unit = Self.Unit{
+                    .start = self.utf8.cur_idx - unit.data.len,
+                    .len = unit.data.len,
+                    .codepoints_count = unit.codepoints_count,
+                    .dw = unit.dw,
+                };
+                
+                self.units.insertAtCursorAssumeCapacity(buf_unit);
+            }
+        }
+
+        pub fn insertUGFAtCursor(self: *Self, allocator: std.mem.Allocator, unit: *const UGF.Unit) error{ OutOfMemory, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             var utf8_len: usize = 0;
             for (unit.slice()) |cp| {
                 utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
@@ -156,10 +228,10 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 try self.units.grow(allocator, 1);
             }
 
-            return insertAtCursorAssumeCapacity(self, unit);
+            return insertUGFAtCursorAssumeCapacity(self, unit);
         }
 
-        pub inline fn insertAtCursorAssumeCapacity(self: *Self, unit: *const UGF.Unit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+        pub inline fn insertUGFAtCursorAssumeCapacity(self: *Self, unit: *const UGF.Unit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             var utf8_len: usize = 0;
             for (unit.slice()) |cp| {
                 utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
@@ -170,17 +242,17 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 self.utf8.insertSliceAtCursorAssumeCapacity(buf[0..cp_utf8_len]);
             }
 
-            const ugf8_unit = Self.Unit{
+            const buf_unit = Self.Unit{
                 .start = self.utf8.cur_idx - utf8_len,
                 .len = utf8_len,
                 .codepoints_count = unit.len(),
                 .dw = unit.dw,
             };
 
-            self.units.insertAtCursorAssumeCapacity(ugf8_unit);
+            self.units.insertAtCursorAssumeCapacity(buf_unit);
         }
 
-        pub fn insertSliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF.Unit) std.mem.Allocator.Error!void {
+        pub fn insertUGFSliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF.Unit) error{ OutOfMemory, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             var utf8_len: usize = 0;
             for (slice) |unit| {
                 for (unit.slice()) |cp| {
@@ -198,12 +270,13 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 try self.units.grow(allocator, slice.len);
             }
 
-            @call(.always_inline, insertSliceAtCursorAssumeCapacity, .{ self, slice });
+            @call(.always_inline, insertUGFSliceAtCursorAssumeCapacity, .{ self, slice });
         }
 
-        pub fn insertSliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF.Unit) void {
+        pub fn insertUGFSliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF.Unit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             for (slice) |unit| {
-                self.insertAtCursorAssumeCapacity(unit);
+                //TODO: optimize
+                try self.insertUGFAtCursorAssumeCapacity(unit);
             }
         }
 

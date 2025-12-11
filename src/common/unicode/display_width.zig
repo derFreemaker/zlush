@@ -111,7 +111,7 @@ pub fn codePointsWidth(dw: DisplayWidth, codepoints: []const u21) i4 {
 
         if (w != 0) {
             // Handle text emoji sequence.
-            if (codepoints.len > i) {
+            if (codepoints.len > i + 1) {
                 i += 1;
                 const ncp = codepoints[i];
 

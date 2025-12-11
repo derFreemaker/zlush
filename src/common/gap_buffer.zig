@@ -133,7 +133,7 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
         }
         
         pub inline fn canGrowGapRight(self: *const Self, n: usize) bool {
-            return self.secondHalf().len > n; 
+            return self.secondHalf().len >= n; 
         }
 
         pub fn growGapRight(self: *Self, n: usize) bool {
@@ -177,14 +177,14 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
 test "GapBuffer" {
     const allocator = std.testing.allocator;
 
-    var gap_buf: GapBuffer(u8, .{}) = .init;
+    var gap_buf: GapBuffer(u8, .{}) = .empty;
     defer gap_buf.deinit(allocator);
 
     try gap_buf.insertSliceAtCursor(allocator, "abc");
     try std.testing.expectEqualStrings("abc", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("", gap_buf.secondHalf());
-
-    try std.testing.expect(gap_buf.moveGapLeft(1));
+    
+    try std.testing.expect((gap_buf.moveGapLeft(1) catch &.{}).len != 0);
     try std.testing.expectEqualStrings("ab", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("c", gap_buf.secondHalf());
 

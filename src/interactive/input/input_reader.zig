@@ -93,7 +93,7 @@ fn runReader(self: *InputReader) !void {
     if (builtin.is_test) return;
 
     var cp_state: common.Unicode.Graphemes.IterState = .{};
-    var cp_buf: [32]u21 = undefined;
+    var cp_buf: [64]u21 = undefined;
     var cp_len: usize = 0;
 
     while (!self.should_quit) {

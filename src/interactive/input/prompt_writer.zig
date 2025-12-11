@@ -3,7 +3,7 @@ const common = @import("common");
 const UGF = common.Unicode.UGF;
 const UGF8 = common.Unicode.UGF8;
 
-const Winsize = @import("event.zig").Event.Winsize;
+const Winsize = @import("../../tui/input/winsize.zig");
 
 const GapBuffer = UGF8.GapBuffer(.{});
 
@@ -132,8 +132,23 @@ pub fn updateWindowSize(self: *PromptWriter, new_size: Winsize) error{WriteFaile
     return self.redraw();
 }
 
-pub fn insertAtCursor(self: *PromptWriter, unit: *const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
-    try self.buf.insertAtCursor(self.allocator, unit);
+pub fn insertUGF8AtCursor(self: *PromptWriter, unit: *const UGF8.Unit) error{ OutOfMemory, WriteFailed }!void {
+    try self.buf.insertUGF8AtCursor(self.allocator, unit);
+    try self.redraw();
+}
+
+pub fn insertUGF8SliceAtCursor(self: *PromptWriter, slice: []const UGF8.Unit) error{ OutOfMemory, WriteFailed }!void {
+    try self.buf.insertUGF8SliceAtCursor(self.allocator, slice);
+    try self.redraw();
+}
+
+pub fn insertUGFAtCursor(self: *PromptWriter, unit: *const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+    try self.buf.insertUGFAtCursor(self.allocator, unit);
+    try self.redraw();
+}
+
+pub fn insertUGFSliceAtCursor(self: *PromptWriter, slice: []const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
+    try self.buf.insertUGFSliceAtCursor(self.allocator, slice);
     try self.redraw();
 }
 
@@ -161,6 +176,7 @@ pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
             return;
         }
 
+        self.cursor.x += moved_len;
         try common.Ansi.cursor.forward(self.writer, moved_len);
     }
 }
@@ -176,11 +192,13 @@ pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
         for (moved_units) |unit| {
             moved_len += unit.dw;
         }
-        if (self.cursor.x < moved_len) {
+        
+        if (self.cursor.x - 1 < moved_len) {
             try self.redraw();
             return;
         }
 
+        self.cursor.x -= moved_len;
         try common.Ansi.cursor.backward(self.writer, moved_len);
     }
 }

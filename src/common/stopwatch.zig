@@ -113,7 +113,9 @@ fn prettyPrintMicroseconds(writer: *std.Io.Writer, microseconds: f64) std.Io.Wri
 }
 
 pub const Fake = struct {
-    pub fn init(_: std.mem.Allocator) !Fake {}
+    pub fn init(_: std.mem.Allocator) !Fake {
+        return Fake{};
+    }
     pub fn deinit(_: *Fake) void {}
 
     pub fn begin(_: *Fake, _: []const u8) error{OutOfMemory}!void {}

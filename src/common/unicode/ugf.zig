@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const UGF8 = @import("ugf8.zig");
+
 pub const Unit = struct {
     data: UnitData,
     dw: u7,
@@ -65,6 +67,27 @@ pub const Unit = struct {
         return self.data.slice();
     }
 
+    pub fn lenUTF8(self: *const Unit) usize {
+        var utf8_len: usize = 0;
+        for (self.slice()) |cp| {
+            utf8_len += std.unicode.utf8CodepointSequenceLength(cp) catch unreachable;
+        }
+        return utf8_len;
+    }
+
+    pub fn toUGF8(self: *const Unit, buf: []u8) UGF8.Unit {
+        var i: usize = 0;
+        for (self.slice()) |cp| {
+            i += std.unicode.utf8Encode(cp, buf[i..]) catch unreachable;
+        }
+        
+        return UGF8.Unit{
+            .data = buf[0..i],
+            .codepoints_count = self.len(),
+            .dw = self.dw,
+        };
+    }
+
     pub const UnitData = union(enum) {
         single: u21,
         multiple: Multiple,
@@ -81,7 +104,7 @@ pub const Unit = struct {
         pub inline fn len(self: *const UnitData) u13 {
             return switch (self.*) {
                 .single => 1,
-                .multiple => |m| m.len,
+                .multiple => |m| m.len + 1,
             };
         }
 

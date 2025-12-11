@@ -45,7 +45,7 @@ pub fn next(self: *Tokenizer) ?[]const UGF8.Buffer.Unit {
 
                     len += 1;
                 }
-                
+
                 return self.sliceTo(len - 1);
             },
 
@@ -92,7 +92,7 @@ inline fn peek(self: *Tokenizer, n: usize) ?UGF8.Unit {
         return null;
     }
 
-    return self.source.units.items[self.cursor + n].toUnit(&self.source);
+    return self.source.units.items[self.cursor + n].asUGF8(&self.source);
 }
 
 inline fn toss(self: *Tokenizer, n: usize) void {

@@ -1,4 +1,6 @@
 const std = @import("std");
+const common = @import("common");
+const UGF = common.Unicode.UGF;
 
 const Key = @This();
 
@@ -22,9 +24,11 @@ pub const Modifiers = packed struct(u8) {
 
 codepoint: u21,
 shifted_codepoint: ?u21 = null,
-base_layout_codepoint: u21,
+base_layout_codepoint: ?u21 = null,
 
 mods: Modifiers = .{},
+
+is_char: bool = false,
 
 // matches follows a loose matching algorithm for key matches.
 // 1. If the codepoint and modifiers are exact matches, after removing caps_lock
@@ -103,6 +107,10 @@ pub fn isModifier(self: Key) bool {
         self.codepoint == right_control or
         self.codepoint == left_meta or
         self.codepoint == right_meta;
+}
+
+pub fn asUGF(self: Key) UGF.Unit {
+    return common.Unicode.UGF.Unit.initSingle(self.shifted_codepoint orelse self.codepoint, 1);
 }
 
 // a few special keys that we encode as their actual ascii value

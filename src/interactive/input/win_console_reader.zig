@@ -192,9 +192,7 @@ fn peekEvent(self: *WinConsoleReader) error{ReadFailed}!?InputRecord {
         }
     }
 
-    const event = self.events[self.events_pos];
-    std.debug.print("event: {}\n", .{event});
-    return event;
+    return self.events[self.events_pos];
 }
 
 inline fn tossEvent(self: *WinConsoleReader) void {

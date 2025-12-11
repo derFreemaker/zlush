@@ -1,3 +1,4 @@
+const std = @import("std");
 const common = @import("common");
 const UGF8 = common.Unicode.UGF8;
 
@@ -16,5 +17,14 @@ pub const Event = union(enum) {
     focus_out,
 
     winsize: Winsize,
-    paste: UGF8.Buffer,
+    paste: Paste,
+
+    pub const Paste = struct {
+        alloc: std.mem.Allocator,
+        buf: UGF8.Buffer,
+
+        pub inline fn deinit(self: *Paste) void {
+            self.buf.deinit(self.alloc);
+        }
+    };
 };
