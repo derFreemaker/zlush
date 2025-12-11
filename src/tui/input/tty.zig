@@ -187,13 +187,13 @@ fn runTty(self: *Tty) !void {
 
 fn convertGraphemeCodepointsToPasteEvent(self: *Tty, codepoints: []const u21) error{OutOfMemory}!Event {
     const dw: u7 = @intCast(self.dw.codePointsWidth(codepoints));
-    const unit = common.Unicode.UGF.Unit.initBuf(codepoints, dw) catch unreachable;
+    const unit = common.Unicode.UGF.Unit.init(self.alloc, codepoints, dw) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => unreachable,
+    };
 
-    const utf8_buf = try self.paste_alloc.alloc(u8, unit.lenUTF8());
-    defer self.paste_alloc.free(utf8_buf);
-
-    var buf = common.Unicode.UGF8.Buffer.empty;
-    try buf.append(self.paste_alloc, unit.toUGF8(utf8_buf));
+    const buf = try self.alloc.alloc(common.Unicode.UGF.Unit, 1);
+    buf[0] = unit;
 
     return Event{
         .paste = .{

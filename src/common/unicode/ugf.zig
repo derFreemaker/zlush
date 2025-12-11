@@ -80,7 +80,7 @@ pub const Unit = struct {
         for (self.slice()) |cp| {
             i += std.unicode.utf8Encode(cp, buf[i..]) catch unreachable;
         }
-        
+
         return UGF8.Unit{
             .data = buf[0..i],
             .codepoints_count = self.len(),

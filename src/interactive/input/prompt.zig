@@ -35,10 +35,7 @@ pub fn readCommand(self: *Prompt, allocator: std.mem.Allocator) error{ CommandCa
             .paste => |*p| {
                 defer p.deinit();
 
-                const buf = try p.buf.asUGF8Slice(p.alloc);
-                defer p.alloc.free(buf);
-
-                self.writer.insertUGF8SliceAtCursor(buf) catch return error.EchoingStateFailed;
+                self.writer.insertUGFSliceAtCursor(p.buf) catch return error.EchoingStateFailed;
             },
 
             .key_press => |p| {

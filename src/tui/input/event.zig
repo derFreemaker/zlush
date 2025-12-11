@@ -1,6 +1,6 @@
 const std = @import("std");
 const common = @import("common");
-const UGF8 = common.Unicode.UGF8;
+const UGF = common.Unicode.UGF;
 
 const Key = @import("key.zig");
 const Mouse = @import("mouse.zig");
@@ -21,10 +21,14 @@ pub const Event = union(enum) {
 
     pub const Paste = struct {
         alloc: std.mem.Allocator,
-        buf: UGF8.Buffer,
+        buf: []UGF.Unit,
 
         pub inline fn deinit(self: *Paste) void {
-            self.buf.deinit(self.alloc);
+            for (self.buf) |*unit| {
+                unit.deinit(self.alloc);
+            }
+            
+            self.alloc.free(self.buf);
         }
     };
 };

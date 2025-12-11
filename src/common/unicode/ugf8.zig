@@ -75,7 +75,7 @@ pub const Buffer = struct {
 
         const owned = try unit.toOwnedUGF8(self, allocator);
         self.utf8.items.len -= owned.data.len;
-        
+
         return owned;
     }
 
@@ -161,7 +161,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 @branchHint(.unlikely);
                 try self.units.grow(allocator, 1);
             }
- 
+
             return insertUGF8AtCursorAssumeCapacity(self, unit);
         }
 
@@ -177,13 +177,13 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
 
             self.units.insertAtCursorAssumeCapacity(ugf8_unit);
         }
-        
+
         pub fn insertUGF8SliceAtCursor(self: *Self, allocator: std.mem.Allocator, slice: []const UGF8.Unit) error{OutOfMemory}!void {
             var utf8_len: usize = 0;
             for (slice) |unit| {
                 utf8_len += unit.data.len;
             }
-            
+
             if (self.utf8.gap_size < utf8_len) {
                 @branchHint(.unlikely);
                 try self.utf8.grow(allocator, utf8_len);
@@ -193,10 +193,10 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 @branchHint(.unlikely);
                 try self.units.grow(allocator, slice.len);
             }
-            
+
             self.insertUGF8SliceAtCursorAssumeCapacity(slice);
         }
-        
+
         pub fn insertUGF8SliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF8.Unit) void {
             for (slice) |unit| {
                 self.utf8.insertSliceAtCursorAssumeCapacity(unit.data);
@@ -207,7 +207,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                     .codepoints_count = unit.codepoints_count,
                     .dw = unit.dw,
                 };
-                
+
                 self.units.insertAtCursorAssumeCapacity(buf_unit);
             }
         }
@@ -256,7 +256,7 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
             var utf8_len: usize = 0;
             for (slice) |unit| {
                 for (unit.slice()) |cp| {
-                    utf8_len += std.unicode.utf8CodepointSequenceLength(cp);
+                    utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
                 }
             }
 
@@ -270,13 +270,13 @@ pub fn GapBuffer(comptime config: GapBufferConfig) type {
                 try self.units.grow(allocator, slice.len);
             }
 
-            @call(.always_inline, insertUGFSliceAtCursorAssumeCapacity, .{ self, slice });
+            return @call(.always_inline, insertUGFSliceAtCursorAssumeCapacity, .{ self, slice });
         }
 
         pub fn insertUGFSliceAtCursorAssumeCapacity(self: *Self, slice: []const UGF.Unit) error{ Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
             for (slice) |unit| {
                 //TODO: optimize
-                try self.insertUGFAtCursorAssumeCapacity(unit);
+                try self.insertUGFAtCursorAssumeCapacity(&unit);
             }
         }
 
@@ -420,8 +420,41 @@ pub const Unit = struct {
     codepoints_count: u13,
     dw: u7,
 
+    pub fn init(allocator: std.mem.Allocator, codepoints: []const u21, dw: u7) error{ OutOfMemory, NotEnoughCodepoints, TooManyCodepoints, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!Unit {
+        if (codepoints.len == 0) {
+            return error.NotEnoughCodepoints;
+        }
+        if (codepoints.len > std.math.maxInt(u13) + 1) {
+            return error.TooManyCodepoints;
+        }
+
+        const utf8_len = blk: {
+            var utf8_len: usize = 0;
+            for (codepoints) |cp| {
+                utf8_len += try std.unicode.utf8CodepointSequenceLength(cp);
+            }
+            break :blk utf8_len;
+        };
+
+        const utf8_buf = try allocator.alloc(u8, utf8_len);
+        var i: usize = 0;
+        for (codepoints) |cp| {
+            i += try std.unicode.utf8Encode(cp, utf8_buf[i..]);
+        }
+
+        return Unit{
+            .data = utf8_buf,
+            .codepoints_count = @intCast(codepoints.len - 1),
+            .dw = dw,
+        };
+    }
+
     pub inline fn deinit(self: *const Unit, allocator: std.mem.Allocator) void {
         allocator.free(self.data);
+    }
+
+    pub inline fn len(self: *const Unit) usize {
+        return self.codepoints_count + 1;
     }
 
     pub inline fn match(self: *const Unit, data: []const u8) bool {
