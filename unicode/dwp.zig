@@ -37,7 +37,7 @@ pub fn main() anyerror!void {
     var deaw_reader = std.io.Reader.fixed(@embedFile("DerivedEastAsianWidth.txt"));
 
     while (deaw_reader.takeDelimiterInclusive('\n')) |took| {
-        const line = std.mem.trimRight(u8, took, "\n");
+        const line = std.mem.trimEnd(u8, took, "\n\r");
         if (line.len == 0) continue;
 
         // @missing ranges
@@ -96,7 +96,7 @@ pub fn main() anyerror!void {
     var dgc_reader = std.io.Reader.fixed(@embedFile("DerivedGeneralCategory.txt"));
 
     while (dgc_reader.takeDelimiterInclusive('\n')) |took| {
-        const line = std.mem.trimRight(u8, took, "\n");
+        const line = std.mem.trimEnd(u8, took, "\n\r");
         if (line.len == 0 or line[0] == '#') continue;
         const no_comment = if (std.mem.indexOfScalar(u8, line, '#')) |octo| line[0..octo] else line;
 
