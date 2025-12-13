@@ -106,7 +106,7 @@ pub const Grapheme = struct {
     /// `bytes` returns the slice of bytes that correspond to
     /// this grapheme cluster in `src`.
     pub fn bytes(self: Grapheme, src: []const u8) []const u8 {
-        return src[self.offset..][0..self.len];
+        return src[self.offset..self.offset + self.len];
     }
 };
 

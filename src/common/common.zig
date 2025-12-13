@@ -47,9 +47,10 @@ pub const GapBufferConfig = _GapBuffer.GapBufferConfig;
 pub const GapBuffer = _GapBuffer.GapBuffer;
 
 pub const Unicode = struct {
+    pub const CodePoint = @import("unicode/code_point.zig");
     pub const Graphemes = @import("unicode/graphemes.zig");
     pub const DisplayWidth = @import("unicode/display_width.zig");
-
+    
     pub const UGF = @import("unicode/ugf.zig");
     pub const UGF8 = @import("unicode/ugf8.zig");
 };

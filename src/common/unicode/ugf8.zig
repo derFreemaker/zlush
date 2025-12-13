@@ -79,10 +79,35 @@ pub const Buffer = struct {
         return owned;
     }
 
-    pub fn asUGF8Slice(self: *Buffer, allocator: std.mem.Allocator) error{OutOfMemory}![]const UGF8.Unit {
+    pub fn asUTF8Slice(self: *const Buffer) []const u8 {
+        return self.utf8.items;
+    }
+    
+    pub fn asUGF8Slice(self: *const Buffer, allocator: std.mem.Allocator) error{OutOfMemory}![]const UGF8.Unit {
         var buf = try allocator.alloc(UGF8.Unit, self.units.items.len);
+        errdefer allocator.free(buf);
+        
         for (self.units.items, 0..) |unit, i| {
             buf[i] = unit.asUGF8(self);
+        }
+
+        return buf;
+    }
+
+    pub fn toUGF8Slice(self: *const Buffer, allocator: std.mem.Allocator) error{OutOfMemory}![]UGF8.Unit {
+        var buf = try allocator.alloc(UGF8.Unit, self.units.items.len);
+        errdefer allocator.free(buf);
+        
+        var i: usize = 0;
+        errdefer if (i > 0) {
+            for (buf[0..i]) |unit| {
+                unit.deinit(allocator);
+            }
+        };
+        
+        for (self.units.items) |unit| {
+            buf[i] = try unit.toOwnedUGF8(self, allocator);
+            i += 1;
         }
 
         return buf;
@@ -420,7 +445,19 @@ pub const Unit = struct {
     codepoints_count: u13,
     dw: u7,
 
-    pub fn init(allocator: std.mem.Allocator, codepoints: []const u21, dw: u7) error{ OutOfMemory, NotEnoughCodepoints, TooManyCodepoints, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!Unit {
+    pub inline fn init(alloc: std.mem.Allocator, slice: []const u8, codepoints_count: u13, dw: u7) error{OutOfMemory}!Unit {
+        return initBuf(try alloc.dupe(u8, slice), codepoints_count, dw);
+    }
+
+    pub inline fn initBuf(slice: []const u8, codepoints_count: u13, dw: u7) Unit {
+        return Unit{
+            .data = slice,
+            .codepoints_count = codepoints_count,
+            .dw = dw,
+        };
+    }
+
+    pub fn initCodepoints(alloc: std.mem.Allocator, codepoints: []const u21, dw: u7) error{ OutOfMemory, NotEnoughCodepoints, TooManyCodepoints, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!Unit {
         if (codepoints.len == 0) {
             return error.NotEnoughCodepoints;
         }
@@ -436,7 +473,7 @@ pub const Unit = struct {
             break :blk utf8_len;
         };
 
-        const utf8_buf = try allocator.alloc(u8, utf8_len);
+        const utf8_buf = try alloc.alloc(u8, utf8_len);
         var i: usize = 0;
         for (codepoints) |cp| {
             i += try std.unicode.utf8Encode(cp, utf8_buf[i..]);
@@ -449,8 +486,8 @@ pub const Unit = struct {
         };
     }
 
-    pub inline fn deinit(self: *const Unit, allocator: std.mem.Allocator) void {
-        allocator.free(self.data);
+    pub inline fn deinit(self: *const Unit, alloc: std.mem.Allocator) void {
+        alloc.free(self.data);
     }
 
     pub inline fn len(self: *const Unit) usize {
@@ -469,21 +506,23 @@ pub const Unit = struct {
     }
 };
 
-// pub const Encoder = struct {
-//     graphemes: common.Unicode.Graphemes,
-//     dw: common.Unicode.DisplayWidth,
-//
-//     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Encoder {
-//         const graphemes = try common.Unicode.Graphemes.init(allocator);
-//
-//         return Encoder{
-//             .graphemes = graphemes,
-//             .dw = try .initWithGraphemes(allocator, graphemes),
-//         };
-//     }
-//
-//     pub fn deinit(self: *Encoder, allocator: std.mem.Allocator) void {
-//         self.graphemes.deinit(allocator);
-//         self.dw.deinit(allocator);
-//     }
-// };
+pub const Encoder = struct {
+    graphemes: common.Unicode.Graphemes,
+    dw: common.Unicode.DisplayWidth,
+
+    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Encoder {
+        const graphemes = try common.Unicode.Graphemes.init(allocator);
+
+        return Encoder{
+            .graphemes = graphemes,
+            .dw = try .initWithGraphemes(allocator, graphemes),
+        };
+    }
+
+    pub fn deinit(self: *Encoder, allocator: std.mem.Allocator) void {
+        self.graphemes.deinit(allocator);
+        self.dw.deinit(allocator);
+    }
+    
+    
+};

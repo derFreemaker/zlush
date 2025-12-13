@@ -4,6 +4,7 @@ const common = @import("common");
 
 const Event = @import("event.zig").Event;
 const Winsize = @import("winsize.zig");
+const Parser = @import("parser.zig");
 
 const InternalTty = if (builtin.target.os.tag == .windows)
     @import("tty/win_tty.zig")
@@ -29,9 +30,7 @@ internal: InternalTty,
 thread: ?std.Thread = null,
 should_quit: bool = false,
 
-graphemes: common.Unicode.Graphemes,
-dw: common.Unicode.DisplayWidth,
-
+parser: Parser,
 queue: common.Queue(Event),
 
 pub fn init(alloc: std.mem.Allocator, paste_alloc: std.mem.Allocator, stdin: std.fs.File, stdout: std.fs.File, stderr: std.fs.File) error{OutOfMemory}!*Tty {
@@ -41,7 +40,14 @@ pub fn init(alloc: std.mem.Allocator, paste_alloc: std.mem.Allocator, stdin: std
     const stderr_writer_buf = try alloc.alloc(u8, 4096);
     errdefer alloc.free(stderr_writer_buf);
 
-    const graphemes = try common.Unicode.Graphemes.init(alloc);
+    var parser = try Parser.init(alloc);
+    errdefer parser.deinit();
+
+    var queue = common.Queue(Event).init(alloc, 512) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => unreachable,
+    };
+    errdefer queue.deinit(alloc);
 
     const ptr = try alloc.create(Tty);
     ptr.* = Tty{
@@ -60,13 +66,8 @@ pub fn init(alloc: std.mem.Allocator, paste_alloc: std.mem.Allocator, stdin: std
 
         .internal = InternalTty.init(stdin.handle, stdout.handle),
 
-        .graphemes = graphemes,
-        .dw = try common.Unicode.DisplayWidth.initWithGraphemes(alloc, graphemes),
-
-        .queue = common.Queue(Event).init(alloc, 512) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => unreachable,
-        },
+        .parser = parser,
+        .queue = queue,
     };
     return ptr;
 }
@@ -83,9 +84,7 @@ pub fn deinit(self: *Tty) void {
     self.alloc.free(self.stderr_writer_buf);
 
     self.queue.deinit(self.alloc);
-
-    self.dw.deinit(self.alloc);
-    self.graphemes.deinit(self.alloc);
+    self.parser.deinit();
 
     self.alloc.destroy(self);
 }
@@ -135,25 +134,33 @@ fn runTty(self: *Tty) !void {
     if (builtin.is_test) return;
 
     var cp_state: common.Unicode.Graphemes.IterState = .{};
-    var cp_buf: [64]u21 = undefined;
-    var cp_len: usize = 0;
+    var temp_buf: [128]u8 = undefined;
+    var temp_len: usize = 0;
+    var cp_last: ?u21 = null;
 
     while (!self.should_quit) {
         const token = try self.internal.nextToken() orelse {
-            if (cp_len > 0) {
-                if (cp_buf[0] == 27) {
-                    // found escape sequence
+            if (temp_len > 0) {
+                if (temp_buf[0] != 27) {
+                    const event = try self.convertGraphemeToPasteEvent(temp_buf[0..temp_len]);
+                    cp_state = .{};
+                    temp_len = 0;
 
-                    @panic("not implemented");
+                    self.postEvent(event);
+                    continue;
                 }
 
-                const event = try self.convertGraphemeCodepointsToPasteEvent(cp_buf[0..cp_len]);
-                cp_state = .{};
-                cp_len = 0;
-
-                self.postEvent(event);
+                const result = try self.parser.parse(temp_buf[0..temp_len], self.paste_alloc);
+                if (result.event) |event| {
+                    self.postEvent(event);
+                }
+                if (result.n > 0) {
+                    @memmove(temp_buf[0..result.n], temp_buf[result.n..temp_len]);
+                }
+                continue;
             }
 
+            std.Thread.sleep(20 * std.time.ns_per_ms);
             continue;
         };
         if (token == .event) {
@@ -163,37 +170,45 @@ fn runTty(self: *Tty) !void {
 
         const cp = token.cp;
 
-        if (cp_len > 0) {
-            if (cp_buf[0] == 27) {
-                // found escape sequence
-
-                @panic("not implemented");
+        if (temp_len > 0) {
+            if (temp_buf[0] == 27) {
+                const result = try self.parser.parse(temp_buf[0..temp_len], self.paste_alloc);
+                if (result.event) |event| {
+                    self.postEvent(event);
+                }
+                if (result.n > 0) {
+                    @memmove(temp_buf[0..result.n], temp_buf[result.n..temp_len]);
+                }
+                continue;
             }
 
-            const is_break = common.Unicode.Graphemes.graphemeBreak(cp_buf[cp_len - 1], cp, &self.graphemes, &cp_state);
+            const is_break = common.Unicode.Graphemes.graphemeBreak(cp_last.?, cp, &self.parser.graphemes, &cp_state);
             if (is_break) {
-                const event = try self.convertGraphemeCodepointsToPasteEvent(cp_buf[0..cp_len]);
+                const event = try self.convertGraphemeToPasteEvent(temp_buf[0..temp_len]);
                 cp_state = .{};
-                cp_len = 0;
+                temp_len = 0;
 
                 self.postEvent(event);
+                continue;
             }
         }
 
-        cp_buf[cp_len] = cp;
-        cp_len += 1;
+        temp_len += try std.unicode.utf8Encode(cp, temp_buf[temp_len..]);
+        cp_last = cp;
     }
 }
 
-fn convertGraphemeCodepointsToPasteEvent(self: *Tty, codepoints: []const u21) error{OutOfMemory}!Event {
-    const dw: u7 = @intCast(self.dw.codePointsWidth(codepoints));
-    const unit = common.Unicode.UGF.Unit.init(self.alloc, codepoints, dw) catch |err| switch (err) {
+fn convertGraphemeToPasteEvent(self: *Tty, slice: []const u8) !Event {
+    const buf = try self.alloc.alloc(common.Unicode.UGF8.Unit, 1);
+    errdefer self.alloc.free(buf);
+
+    const dw: u7 = @intCast(self.parser.dw.strWidth(slice));
+    const codepoints_count: u13 = @intCast(try std.unicode.utf8CountCodepoints(slice));
+    buf[0] = common.Unicode.UGF8.Unit.init(self.alloc, slice, codepoints_count, dw) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => unreachable,
     };
-
-    const buf = try self.alloc.alloc(common.Unicode.UGF.Unit, 1);
-    buf[0] = unit;
+    errdefer buf[0].deinit(self.alloc);
 
     return Event{
         .paste = .{
