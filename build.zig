@@ -1,111 +1,90 @@
 const std = @import("std");
-const manifest: @import("manifest.zig") = @import("build.zig.zon");
 
-const unicode_build = @import("unicode/build.zig");
+const manifest: @import("manifest.zig") = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
-    const ansi_escape_mod = b.dependency("ansi_escape", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("ansi-escape");
-    
     const zttio_mod = b.dependency("zttio", .{
         .target = target,
         .optimize = optimize,
     }).module("zttio");
-    
-    const common_mod = b.addModule("common", .{
+
+    const tracy = Tracy.init(b, .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const mod = b.addModule("zlush", .{
         .target = target,
         .optimize = optimize,
 
-        .root_source_file = b.path("src/common/common.zig"),
-
-        .imports = &.{
-            .{
-                .name = "zon",
-                .module = b.createModule(.{
-                    .root_source_file = b.path("build.zig.zon"),
-                }),
-            },
-            // .{ .name = "zigwin", .module = zigwin_mod },
-            .{ .name = "ansi-escape", .module = ansi_escape_mod },
-        },
+        .root_source_file = b.path("src/root.zig"),
     });
+    tracy.importFor(mod);
 
-    const zlush_mod = b.addModule("zlush", .{
-        .target = target,
+    const exe_mod = b.createModule(.{
         .optimize = optimize,
+        .target = target,
 
-        .root_source_file = b.path("src/zlush.zig"),
+        .root_source_file = b.path("src/main.zig"),
 
         .imports = &.{
-            .{ .name = "common", .module = common_mod },
+            .{ .name = "zttio", .module = zttio_mod },
+
+            .{ .name = "zlush", .module = mod },
         },
     });
-
-    const zlush_exe = b.addExecutable(.{
+    tracy.importFor(exe_mod);
+    const exe = b.addExecutable(.{
         .name = "zlush",
         .version = version,
-
-        .root_module = b.createModule(.{
-            .optimize = optimize,
-            .target = target,
-
-            .root_source_file = b.path("src/main.zig"),
-
-            .imports = &.{
-                .{ .name = "common", .module = common_mod },
-                .{ .name = "zttio", .module = zttio_mod },
-
-                .{ .name = "zlush", .module = zlush_mod },
-            },
-        }),
+        .root_module = exe_mod,
     });
-    zlush_exe.linkLibC();
-    b.installArtifact(zlush_exe);
+    b.installArtifact(exe);
 
-    // Tracy
-    {
-        const tracy_enabled = b.option(
+    const mod_tests = b.addTest(.{
+        .root_module = mod,
+    });
+    const run_mod_tests = b.addRunArtifact(mod_tests);
+
+    const zlush_exe_tests = b.addTest(.{
+        .root_module = exe_mod,
+    });
+    const run_exe_tests = b.addRunArtifact(zlush_exe_tests);
+
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&run_mod_tests.step);
+    test_step.dependOn(&run_exe_tests.step);
+}
+
+pub const Tracy = struct {
+    dependecy: *std.Build.Dependency,
+    enabled: bool,
+
+    pub fn init(b: *std.Build, args: anytype) Tracy {
+        const enabled = b.option(
             bool,
             "tracy",
             "Build with Tracy support.",
         ) orelse false;
 
-        const tracy = b.dependency("tracy", .{
-            .target = target,
-            .optimize = optimize,
-        });
+        const tracy = b.dependency("tracy", args);
 
-        zlush_exe.root_module.addImport("tracy", tracy.module("tracy"));
-        if (tracy_enabled) {
-            zlush_exe.root_module.addImport("tracy_impl", tracy.module("tracy_impl_enabled"));
-        } else {
-            zlush_exe.root_module.addImport("tracy_impl", tracy.module("tracy_impl_disabled"));
-        }
+        return Tracy{
+            .dependecy = tracy,
+            .enabled = enabled,
+        };
     }
 
-    const common_mod_tests = b.addTest(.{
-        .root_module = common_mod,
-    });
-    const run_common_mod_tests = b.addRunArtifact(common_mod_tests);
-
-    const zlush_mod_tests = b.addTest(.{
-        .root_module = zlush_mod,
-    });
-    const run_zlush_mod_tests = b.addRunArtifact(zlush_mod_tests);
-
-    const zlush_exe_tests = b.addTest(.{
-        .root_module = zlush_exe.root_module,
-    });
-    const run_zlush_exe_tests = b.addRunArtifact(zlush_exe_tests);
-
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_common_mod_tests.step);
-    test_step.dependOn(&run_zlush_mod_tests.step);
-    test_step.dependOn(&run_zlush_exe_tests.step);
-}
+    pub fn importFor(self: *const Tracy, module: *std.Build.Module) void {
+        module.addImport("tracy", self.dependecy.module("tracy"));
+        if (self.enabled) {
+            module.addImport("tracy_impl", self.dependecy.module("tracy_impl_enabled"));
+        } else {
+            module.addImport("tracy_impl", self.dependecy.module("tracy_impl_disabled"));
+        }
+    }
+};
