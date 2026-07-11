@@ -1,8 +1,23 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common");
+const zttio = @import("zttio");
 
 const Interactive = @import("interactive/interactive.zig");
+
+pub const panic = std.debug.FullPanic(zlushPanic);
+
+pub var global_tty: ?*zttio.Tty = null;
+
+fn zlushPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+    if (global_tty) |tty| {
+        tty.revertTerminal();
+    }
+
+    std.debug.defaultPanic(msg, first_trace_addr);
+}
+
+pub const tracy_impl = @import("tracy_impl");
 
 pub fn main() !u8 {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -24,17 +39,6 @@ pub fn main() !u8 {
     defer interactive.deinit();
     return interactive.loop();
 }
-
-pub const panic = std.debug.FullPanic(zlush_panic);
-
-fn zlush_panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-    const RawMode = @import("interactive/raw_mode.zig");
-    RawMode.disable();
-
-    std.debug.defaultPanic(msg, first_trace_addr);
-}
-
-pub const tracy_impl = @import("tracy_impl");
 
 test {
     @setEvalBranchQuota(2_000_000);

@@ -1,11 +1,7 @@
 const std = @import("std");
 const common = @import("common");
-const UGF = common.Unicode.UGF;
-const UGF8 = common.Unicode.UGF8;
 
-const Winsize = @import("../../tui/input/winsize.zig");
-
-const GapBuffer = UGF8.GapBuffer(.{});
+const Winsize = @import("zttio").Winsize;
 
 const PromptWriter = @This();
 
@@ -15,7 +11,7 @@ writer: *std.Io.Writer,
 identation: u32,
 winsize: Vec2,
 
-buf: GapBuffer,
+buf: common.Unicode.UGF8.GapBuffer(.{}),
 cursor: Vec2,
 end: Vec2,
 
@@ -70,10 +66,10 @@ pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
         return;
     }
 
-    try self.writeText(self.buf.units.firstHalf(), self.buf.utf8.firstHalf());
+    try self.writeText(self.buf.units.firstHalf(), self.buf.data.firstHalf());
     const cursor_edit_pos = self.cursor;
 
-    try self.writeText(self.buf.units.secondHalf(), self.buf.utf8.secondHalf());
+    try self.writeText(self.buf.units.secondHalf(), self.buf.data.secondHalf());
     self.end = self.cursor;
 
     if (self.end.y > cursor_edit_pos.y) {
@@ -84,7 +80,7 @@ pub fn draw(self: *PromptWriter) error{WriteFailed}!void {
     self.cursor = cursor_edit_pos;
 }
 
-fn writeText(self: *PromptWriter, units: []const GapBuffer.Unit, utf8: []const u8) error{WriteFailed}!void {
+fn writeText(self: *PromptWriter, units: []const common.Unicode.UGF8.GapBuffer(.{}).Unit, utf8: []const u8) error{WriteFailed}!void {
     if (utf8.len == 0) {
         return;
     }
@@ -128,27 +124,17 @@ pub inline fn flush(self: *PromptWriter) error{WriteFailed}!void {
 }
 
 pub fn updateWindowSize(self: *PromptWriter, new_size: Winsize) error{WriteFailed}!void {
+    if (self.winsize.x == new_size.cols and self.winsize.y == new_size.rows) {
+        return;
+    }
+    
     self.winsize = Vec2{ .x = new_size.cols, .y = new_size.rows };
     return self.redraw();
 }
 
-pub fn insertUGF8AtCursor(self: *PromptWriter, unit: *const UGF8.Unit) error{ OutOfMemory, WriteFailed }!void {
-    try self.buf.insertUGF8AtCursor(self.allocator, unit);
-    try self.redraw();
-}
-
-pub fn insertUGF8SliceAtCursor(self: *PromptWriter, slice: []const UGF8.Unit) error{ OutOfMemory, WriteFailed }!void {
-    try self.buf.insertUGF8SliceAtCursor(self.allocator, slice);
-    try self.redraw();
-}
-
-pub fn insertUGFAtCursor(self: *PromptWriter, unit: *const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
-    try self.buf.insertUGFAtCursor(self.allocator, unit);
-    try self.redraw();
-}
-
-pub fn insertUGFSliceAtCursor(self: *PromptWriter, slice: []const UGF.Unit) error{ OutOfMemory, WriteFailed, Utf8CannotEncodeSurrogateHalf, CodepointTooLarge }!void {
-    try self.buf.insertUGFSliceAtCursor(self.allocator, slice);
+pub fn insertCharAtCursor(self: *PromptWriter, slice: []const u8, width: usize) error{ OutOfMemory, WriteFailed }!void {
+    const unit = common.Unicode.UGF8.Unit.initBuf(slice, 1, @intCast(width));
+    try self.buf.insertUGF8AtCursor(self.allocator, &unit);
     try self.redraw();
 }
 
@@ -165,7 +151,7 @@ pub fn deleteAfterCursor(self: *PromptWriter) error{WriteFailed}!void {
 }
 
 pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
-    if (@as(?[]const GapBuffer.Unit, self.buf.moveGapRight(n) catch null)) |moved_units| {
+    if (@as(?[]const common.Unicode.UGF8.GapBuffer(.{}).Unit, self.buf.moveGapRight(n) catch null)) |moved_units| {
         var moved_len: u32 = 0;
         for (moved_units) |unit| {
             moved_len += unit.dw;
@@ -182,7 +168,7 @@ pub fn moveCursorRight(self: *PromptWriter, n: usize) error{WriteFailed}!void {
 }
 
 pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
-    if (@as(?[]const GapBuffer.Unit, self.buf.moveGapLeft(n) catch null)) |moved_units| {
+    if (@as(?[]const common.Unicode.UGF8.GapBuffer(.{}).Unit, self.buf.moveGapLeft(n) catch null)) |moved_units| {
         if (self.cursor.x == 0 or (self.cursor.y == 0 and self.cursor.x == self.identation)) {
             try self.redraw();
             return;
@@ -192,7 +178,7 @@ pub fn moveCursorLeft(self: *PromptWriter, n: usize) error{WriteFailed}!void {
         for (moved_units) |unit| {
             moved_len += unit.dw;
         }
-        
+
         if (self.cursor.x - 1 < moved_len) {
             try self.redraw();
             return;
@@ -219,8 +205,8 @@ pub fn toOwnedSlice(self: *const PromptWriter, allocator: std.mem.Allocator) err
         buf_len += g.data.len;
     }
 
-    const first_half = self.buf.utf8.firstHalf();
-    const second_half = self.buf.utf8.secondHalf();
+    const first_half = self.buf.data.firstHalf();
+    const second_half = self.buf.data.secondHalf();
 
     var buf = try allocator.alloc(u8, buf_len);
     @memcpy(buf[0..first_half.len], first_half);

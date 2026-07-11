@@ -2,19 +2,15 @@
     .name = .zlush,
     .version = "0.0.0",
     .fingerprint = 0x11f12e2ce16ebcb6, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tracy = .{
-            .url = "git+https://github.com/Games-By-Mason/tracy_zig#81acd22b8218668ad1215835fb21d63bf04ae6b4",
-            .hash = "tracy-0.0.0-R7l8BSJIAQCSQWVPOIr-kFep8eSZzkD60a2h5O0gt3S2",
+            .url = "git+https://codeberg.org/Games-by-Mason/tracy_zig#64d3caa521e44b1ebce438c0958bd5537e250193",
+            .hash = "tracy-1.0.0+0.13.1-R7l8BUhQAQCLinsSpkKfLYpdgnI8aVTJG3v0XLBkJE5T",
         },
-        .ansi_escape = .{
-            .url = "https://github.com/hendriknielaender/ansi-escape.zig/archive/c78b33d.tar.gz",
-            .hash = "ansi_escape-0.3.0-aPb1J35LAAC6DMir9iht5fZE4WtVFBG0e3VGHRgsE0cu",
-        },
-        .zigwin32 = .{
-            .url = "git+https://github.com/marlersoft/zigwin32#5587b16fa040573846a6bf531301f6206d31a6bf",
-            .hash = "zigwin32-25.0.28-preview-AAAAAICM5AMResOGQnQ85mfe60TTOQeMtt7GRATUOKoP",
+        .zttio = .{
+            .url = "git+https://github.com/derFreemaker/zttio#6d7d36fe1b12e828829d16003a8e7a0ffe24af23",
+            .hash = "zttio-0.4.0-e5eFcKulAwC5mRS3CydQu8NAYcphZ5hT0AVYXojwkLbG",
         },
     },
     .paths = .{

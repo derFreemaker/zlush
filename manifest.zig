@@ -1,12 +1,10 @@
-
 name: enum { zlush },
 version: []const u8,
 fingerprint: u64,
 minimum_zig_version: []const u8,
 dependencies: struct {
     tracy: Dependency,
-    ansi_escape: Dependency,
-    zigwin32: Dependency,
+    zttio: Dependency,
 },
 paths: []const []const u8,
 

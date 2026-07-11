@@ -1,6 +1,6 @@
 const std = @import("std");
 const common = @import("common");
-const UGF8 = common.Unicode.UGF8;
+// const UGF8 = common.Unicode.UGF8;
 
 // const Tokenizer = @import("tokenizer.zig");
 

@@ -76,7 +76,7 @@ pub fn display(self: *Stopwatch, writer: *std.Io.Writer) std.Io.Writer.Error!voi
         } else {
             try writer.print("open", .{});
         }
-        
+
         try writer.writeByte('\n');
     }
 }
@@ -103,24 +103,24 @@ fn prettyPrintMicroseconds(writer: *std.Io.Writer, microseconds: f64) std.Io.Wri
         // Less than 1hr: show minutes and seconds
         const mins = @as(u64, @intFromFloat(m));
         const secs = @as(u64, @intFromFloat(s)) % 60;
-        try writer.print("{d}m {d}s", .{mins, secs});
+        try writer.print("{d}m {d}s", .{ mins, secs });
     } else {
         // 1hr or more: show hours and minutes
         const hours = @as(u64, @intFromFloat(h));
         const mins = @as(u64, @intFromFloat(m)) % 60;
-        try writer.print("{d}h {d}m", .{hours, mins});
+        try writer.print("{d}h {d}m", .{ hours, mins });
     }
 }
 
-pub const Fake = struct {
-    pub fn init(_: std.mem.Allocator) !Fake {
-        return Fake{};
+pub const Disabled = struct {
+    pub fn init(_: std.mem.Allocator) !Disabled {
+        return Disabled{};
     }
-    pub fn deinit(_: *Fake) void {}
+    pub fn deinit(_: *Disabled) void {}
 
-    pub fn begin(_: *Fake, _: []const u8) error{OutOfMemory}!void {}
-    pub fn end(_: *Stopwatch) void {}
-    pub fn display(_: *Stopwatch, _: *std.Io.Writer) std.Io.Writer.Error!void {}
+    pub fn begin(_: *Disabled, _: []const u8) error{OutOfMemory}!void {}
+    pub fn end(_: *Disabled) void {}
+    pub fn display(_: *Disabled, _: *std.Io.Writer) std.Io.Writer.Error!void {}
 };
 
 // // Example usage:

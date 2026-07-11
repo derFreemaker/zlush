@@ -119,8 +119,8 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
 
         pub inline fn canGrowGapLeft(self: *const Self, n: usize) bool {
             return self.cur_idx >= n;
-        } 
-        
+        }
+
         pub fn growGapLeft(self: *Self, n: usize) bool {
             if (!self.canGrowGapLeft(n)) {
                 @branchHint(.cold);
@@ -131,9 +131,9 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
             self.cur_idx -= n;
             return true;
         }
-        
+
         pub inline fn canGrowGapRight(self: *const Self, n: usize) bool {
-            return self.secondHalf().len >= n; 
+            return self.secondHalf().len >= n;
         }
 
         pub fn growGapRight(self: *Self, n: usize) bool {
@@ -148,7 +148,7 @@ pub fn GapBuffer(comptime T: type, comptime config: GapBufferConfig) type {
 
         pub inline fn clearAndFree(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.buf);
-            self.* = .init;
+            self.* = .empty;
         }
 
         pub inline fn clearRetainingCapacity(self: *Self) void {
@@ -183,7 +183,7 @@ test "GapBuffer" {
     try gap_buf.insertSliceAtCursor(allocator, "abc");
     try std.testing.expectEqualStrings("abc", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("", gap_buf.secondHalf());
-    
+
     try std.testing.expect((gap_buf.moveGapLeft(1) catch &.{}).len != 0);
     try std.testing.expectEqualStrings("ab", gap_buf.firstHalf());
     try std.testing.expectEqualStrings("c", gap_buf.secondHalf());

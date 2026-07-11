@@ -8,19 +8,16 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
-    // unicode
-    const dwp_options = b.addOptions();
-    dwp_options.addOption(bool, "cjk", false);
-    dwp_options.addOption(?i4, "c0_width", null);
-    dwp_options.addOption(?i4, "c1_width", null);
-
-    const ansi_escape = b.dependency("ansi_escape", .{
+    const ansi_escape_mod = b.dependency("ansi_escape", .{
         .target = target,
         .optimize = optimize,
     }).module("ansi-escape");
-
-    const zigwin = b.dependency("zigwin32", .{}).module("win32");
-
+    
+    const zttio_mod = b.dependency("zttio", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zttio");
+    
     const common_mod = b.addModule("common", .{
         .target = target,
         .optimize = optimize,
@@ -34,13 +31,10 @@ pub fn build(b: *std.Build) !void {
                     .root_source_file = b.path("build.zig.zon"),
                 }),
             },
-            .{ .name = "zigwin", .module = zigwin },
-            .{ .name = "ansi-escape", .module = ansi_escape },
+            // .{ .name = "zigwin", .module = zigwin_mod },
+            .{ .name = "ansi-escape", .module = ansi_escape_mod },
         },
     });
-    common_mod.addOptions("dwp_options", dwp_options);
-    common_mod.addAnonymousImport("gbp", .{ .root_source_file = unicode_build.buildGBPTables(b) });
-    common_mod.addAnonymousImport("dwp", .{ .root_source_file = unicode_build.buildDWPTables(b, dwp_options) });
 
     const zlush_mod = b.addModule("zlush", .{
         .target = target,
@@ -50,7 +44,6 @@ pub fn build(b: *std.Build) !void {
 
         .imports = &.{
             .{ .name = "common", .module = common_mod },
-            .{ .name = "zigwin", .module = zigwin },
         },
     });
 
@@ -66,7 +59,7 @@ pub fn build(b: *std.Build) !void {
 
             .imports = &.{
                 .{ .name = "common", .module = common_mod },
-                .{ .name = "zigwin", .module = zigwin },
+                .{ .name = "zttio", .module = zttio_mod },
 
                 .{ .name = "zlush", .module = zlush_mod },
             },

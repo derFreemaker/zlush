@@ -1,54 +1,38 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const common = @import("common");
+const zttio = @import("zttio");
 
 const Zlush = @import("zlush");
 
-const RawMode = @import("raw_mode.zig");
-
-const Tty = @import("../tui/input/tty.zig");
-const InputReader = @import("input/input_reader.zig");
 const Prompt = @import("input/prompt.zig");
 
 const Interactive = @This();
 
 allocator: std.mem.Allocator,
 
-// reader: *InputReader,
-tty: *Tty,
+tty: *zttio.Tty,
 
 zlush: Zlush,
 
 sw: *common.Stopwatch,
 
-pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ FailedToSetRawMode, OutOfMemory }!Interactive {
+pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ OutOfMemory, WriteFailed, NoTty, UnableToEnterRawMode, UnableToQueryTerminalCapabilities, UnableToGetWinsize, UnableToStartReader }!Interactive {
     try sw.begin("initialize interactive");
     defer sw.end();
-
-    // RawMode.enable() catch return error.FailedToSetRawMode;
-    //
-    // const reader = blk: {
-    //     try sw.begin("start input reader");
-    //     defer sw.end();
-    //
-    //     const reader = try InputReader.init(allocator);
-    //     reader.start() catch @panic("unable to start console reader thread");
-    //     break :blk reader;
-    // };
 
     const tty = blk: {
         try sw.begin("start tty");
         defer sw.end();
 
-        const tty = try Tty.init(allocator, allocator, std.fs.File.stdin(), std.fs.File.stdout(), std.fs.File.stderr());
-        tty.start() catch @panic("unable to start tty");
+        const tty = try zttio.Tty.init(allocator, allocator, .stdin(), .stdout(), null, .{});
+        @import("root").global_tty = tty;
         break :blk tty;
     };
 
     return Interactive{
         .allocator = allocator,
 
-        // .reader = reader,
         .tty = tty,
 
         .zlush = try .init(allocator, sw),
@@ -59,14 +43,13 @@ pub fn init(allocator: std.mem.Allocator, sw: *common.Stopwatch) error{ FailedTo
 
 pub fn deinit(self: *Interactive) void {
     self.tty.deinit();
-    
-    RawMode.disable();
 }
 
 pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }!u8 {
-    try self.sw.display(self.tty.stdoutWriter());
+    try self.sw.display(self.tty.stdout);
+    try self.tty.stdout.print("{any}\n", .{ self.tty.caps });
     while (true) {
-        const stdout = self.tty.stdoutWriter();
+        const stdout = self.tty.stdout;
         defer stdout.flush() catch @panic("unable to flush");
 
         var buf = self.promptUser(self.allocator) catch |err| switch (err) {
@@ -74,8 +57,10 @@ pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, Rea
             else => |e| return e,
         };
         defer buf.deinit(self.allocator);
-        const raw_buf = buf.utf8.items;
+        // defer self.allocator.free(buf);
 
+        const raw_buf = buf.asUTF8Slice();
+        
         if (std.mem.eql(u8, raw_buf, "exit")) {
             return 0;
         }
@@ -85,18 +70,23 @@ pub fn loop(self: *Interactive) error{ OutOfMemory, WriteFailed, EndOfInput, Rea
             continue;
         }
 
-        try stdout.writeAll(buf.utf8.items);
+        try stdout.writeAll(raw_buf);
         try stdout.writeByte('\n');
         // const exit_code = try self.zlush.execute(buf);
         // try stdout.print("exitcode: {}\n", .{exit_code});
         try stdout.flush();
     }
+    
+    // var tui = try Tui.init(self.allocator);
+    // tui.render(self.tty.stdoutWriter()) catch unreachable;
+    
+    return 0;
 }
 
 pub fn promptUser(self: *Interactive, allocator: std.mem.Allocator) error{ OutOfMemory, WriteFailed, EndOfInput, ReadingCommandFailed, EchoingStateFailed }!common.Unicode.UGF8.Buffer {
     while (true) {
         const prompt_len = 7;
-        const stdout = self.tty.stdoutWriter();
+        const stdout = self.tty.stdout;
         try stdout.writeAll("zlush> ");
         try stdout.flush();
 
