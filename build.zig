@@ -12,18 +12,28 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("zttio");
 
-    const tracy = Tracy.init(b, .{
+    const tracy = b.dependency("tracy", .{
         .target = target,
         .optimize = optimize,
+
+        .enabled = b.option(
+            bool,
+            "tracy",
+            "Build with Tracy support.",
+        ) orelse false,
     });
+    const tracy_mod = tracy.module("tracy");
 
     const mod = b.addModule("zlush", .{
         .target = target,
         .optimize = optimize,
 
         .root_source_file = b.path("src/root.zig"),
+
+        .imports = &.{
+            .{ .name = "tracy", .module = tracy_mod },
+        },
     });
-    tracy.importFor(mod);
 
     const exe_mod = b.createModule(.{
         .optimize = optimize,
@@ -32,15 +42,22 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
 
         .imports = &.{
+            .{ .name = "tracy", .module = tracy_mod },
+
             .{ .name = "zttio", .module = zttio_mod },
 
             .{ .name = "zlush", .module = mod },
         },
     });
-    tracy.importFor(exe_mod);
+
+    const manifest_options = b.addOptions();
+    manifest_options.addOption([]const u8, "version", manifest.version);
+    exe_mod.addOptions("manifest", manifest_options);
+
     const exe = b.addExecutable(.{
         .name = "zlush",
         .version = version,
+
         .root_module = exe_mod,
     });
     b.installArtifact(exe);
@@ -59,32 +76,3 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 }
-
-pub const Tracy = struct {
-    dependecy: *std.Build.Dependency,
-    enabled: bool,
-
-    pub fn init(b: *std.Build, args: anytype) Tracy {
-        const enabled = b.option(
-            bool,
-            "tracy",
-            "Build with Tracy support.",
-        ) orelse false;
-
-        const tracy = b.dependency("tracy", args);
-
-        return Tracy{
-            .dependecy = tracy,
-            .enabled = enabled,
-        };
-    }
-
-    pub fn importFor(self: *const Tracy, module: *std.Build.Module) void {
-        module.addImport("tracy", self.dependecy.module("tracy"));
-        if (self.enabled) {
-            module.addImport("tracy_impl", self.dependecy.module("tracy_impl_enabled"));
-        } else {
-            module.addImport("tracy_impl", self.dependecy.module("tracy_impl_disabled"));
-        }
-    }
-};

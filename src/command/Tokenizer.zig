@@ -37,6 +37,7 @@ pub const Token = struct {
         tilde,
         caret,
         pipe,
+        question_mark,
 
         l_angle_bracket,
         r_angle_bracket,
@@ -74,6 +75,7 @@ pub const Token = struct {
                 .tilde => "~",
                 .caret => "^",
                 .pipe => "|",
+                .question_mark => "?",
 
                 .l_paren => "(",
                 .r_paren => ")",
@@ -235,6 +237,10 @@ pub fn peek(self: *Tokenizer) Token {
                 self.index += 1;
                 token.tag = .pipe;
             },
+            '?' => {
+                self.index += 1;
+                token.tag = .question_mark;
+            },
 
             '<' => {
                 self.index += 1;
@@ -351,11 +357,11 @@ fn testTokenize(source: [:0]const u8, expected_token_tags: []const Token.Tag) !v
 }
 
 test "invalid" {
-    try testTokenize("?test", &[_]Token.Tag{
+    try testTokenize("\x00test", &[_]Token.Tag{
         .invalid,
     });
 
-    try testTokenize("? test", &[_]Token.Tag{
+    try testTokenize("\x00 test", &[_]Token.Tag{
         .invalid,
         .identifier,
     });

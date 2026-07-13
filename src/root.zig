@@ -15,7 +15,8 @@ pub fn deinit(self: *Zlush) void {
 }
 
 test {
-    _ = @import("Tokenizer.zig");
+    _ = @import("cli/Tokenizer.zig");
+    _ = @import("command/Tokenizer.zig");
 
     _ = std.testing.refAllDecls(@This());
 

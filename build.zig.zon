@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tracy = .{
-            .url = "git+https://codeberg.org/Games-by-Mason/tracy_zig#64d3caa521e44b1ebce438c0958bd5537e250193",
-            .hash = "tracy-1.0.0+0.13.1-R7l8BUhQAQCLinsSpkKfLYpdgnI8aVTJG3v0XLBkJE5T",
+            .url = "git+https://codeberg.org/Freemaker/tracy_zig?ref=simplify_options#240d2f0fdce5c332c9eab10f694c6d52d84aef42",
+            .hash = "tracy-1.0.0+0.13.1-R7l8BW9SAQAzf4mkyOjAU3KeN-Na4xTFcctTqs9KCz_h",
         },
         .zttio = .{
             .url = "git+https://github.com/derFreemaker/zttio#6d7d36fe1b12e828829d16003a8e7a0ffe24af23",
