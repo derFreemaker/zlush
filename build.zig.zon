@@ -12,6 +12,10 @@
             .url = "git+https://github.com/derFreemaker/zttio#6d7d36fe1b12e828829d16003a8e7a0ffe24af23",
             .hash = "zttio-0.4.0-e5eFcKulAwC5mRS3CydQu8NAYcphZ5hT0AVYXojwkLbG",
         },
+        .zag = .{
+            .url = "git+https://codeberg.org/Freemaker/zag#b42504657b79f410fd993ea2cc7b984229fb5d81",
+            .hash = "zag-0.1.0-vjZt6C5oAQDIrLm7H7QDKB_dHc_cJy_K_MGwh_PzvMuX",
+        },
     },
     .paths = .{
         "build.zig",

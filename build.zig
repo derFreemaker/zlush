@@ -12,6 +12,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }).module("zttio");
 
+    const zag_mod = b.dependency("zag", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zag");
+
     const tracy = b.dependency("tracy", .{
         .target = target,
         .optimize = optimize,
@@ -45,6 +50,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "tracy", .module = tracy_mod },
 
             .{ .name = "zttio", .module = zttio_mod },
+            .{ .name = "zag", .module = zag_mod },
 
             .{ .name = "zlush", .module = mod },
         },
