@@ -16,10 +16,14 @@ pub const Token = struct {
     pub const Tag = enum {
         invalid,
         eof,
+        space,
 
         identifier,
-        number_literal,
         string_literal,
+
+        number_literal,
+        binary_literal,
+        hex_literal,
 
         comma,
         semicolon,
@@ -52,9 +56,14 @@ pub const Token = struct {
             return switch (tag) {
                 .invalid,
                 .eof,
+                .space,
+
                 .identifier,
-                .number_literal,
                 .string_literal,
+
+                .number_literal,
+                .binary_literal,
+                .hex_literal,
                 => null,
 
                 .comma => ",",
@@ -101,7 +110,7 @@ pub fn init(buf: [:0]const u8) Tokenizer {
 }
 
 pub fn dump(self: *Tokenizer, token: *const Token) void {
-    std.debug.print("{s} '{s}'\n", .{
+    std.debug.print(".{s} '{s}'\n", .{
         @tagName(token.tag),
         token.loc.getBytes(self.buf),
     });
@@ -112,9 +121,14 @@ const State = enum {
     start,
     eof,
 
+    space,
+
     identifier,
-    number_literal,
     string_literal,
+
+    binary_literal,
+    number_literal,
+    hex_literal,
 };
 
 pub fn peek(self: *Tokenizer) Token {
@@ -132,17 +146,20 @@ pub fn peek(self: *Tokenizer) Token {
 
     state: switch (State.start) {
         .invalid => {
-            self.index += 1;
             switch (self.buf[self.index]) {
                 0 => {
                     if (self.index == self.buf.len) {
                         token.tag = .invalid;
                     } else {
+                        self.index += 1;
                         continue :state .invalid;
                     }
                 },
                 ' ', '\t', '\n', '\r' => token.tag = .invalid,
-                else => continue :state .invalid,
+                else => {
+                    self.index += 1;
+                    continue :state .invalid;
+                },
             }
         },
 
@@ -155,9 +172,8 @@ pub fn peek(self: *Tokenizer) Token {
                 continue :state .invalid;
             },
             ' ', '\t', '\n', '\r' => {
-                self.index += 1;
-                token.loc.start = self.index;
-                continue :state .start;
+                token.tag = .space;
+                continue :state .space;
             },
 
             'a'...'z', 'A'...'Z', '_' => {
@@ -282,18 +298,18 @@ pub fn peek(self: *Tokenizer) Token {
             token.tag = .eof;
         },
 
-        .identifier => {
+        .space => {
             self.index += 1;
             switch (self.buf[self.index]) {
-                'a'...'z', 'A'...'Z', '_', '0'...'9' => continue :state .identifier,
+                ' ', '\t', '\n', '\r' => continue :state .space,
                 else => {},
             }
         },
 
-        .number_literal => {
+        .identifier => {
             self.index += 1;
             switch (self.buf[self.index]) {
-                '0'...'9', 'a'...'z', 'A'...'Z' => continue :state .number_literal,
+                'a'...'z', 'A'...'Z', '_', '0'...'9' => continue :state .identifier,
                 else => {},
             }
         },
@@ -316,6 +332,42 @@ pub fn peek(self: *Tokenizer) Token {
                 },
                 0 => {},
                 else => continue :state .string_literal,
+            }
+        },
+
+        .number_literal => {
+            self.index += 1;
+            switch (self.buf[self.index]) {
+                '0'...'9', '_' => continue :state .number_literal,
+                'b', 'B' => {
+                    token.tag = .binary_literal;
+                    continue :state .binary_literal;
+                },
+                'x', 'X' => {
+                    token.tag = .hex_literal;
+                    continue :state .hex_literal;
+                },
+                else => {},
+            }
+        },
+
+        .binary_literal => {
+            self.index += 1;
+            switch (self.buf[self.index]) {
+                '0', '1', '_' => continue :state .binary_literal,
+                else => {},
+            }
+        },
+
+        .hex_literal => {
+            self.index += 1;
+            switch (self.buf[self.index]) {
+                '0'...'9',
+                'a'...'f',
+                'A'...'F',
+                '_',
+                => continue :state .hex_literal,
+                else => {},
             }
         },
     }
@@ -343,7 +395,8 @@ fn testTokenize(source: [:0]const u8, expected_token_tags: []const Token.Tag) !v
     var tokenizer = Tokenizer.init(source);
     for (expected_token_tags) |expected_token_tag| {
         const token = tokenizer.next();
-        // tokenizer.dump(&token);
+        errdefer tokenizer.dump(&token);
+
         try std.testing.expectEqual(expected_token_tag, token.tag);
     }
 
@@ -363,25 +416,42 @@ test "invalid" {
 
     try testTokenize("\x00 test", &[_]Token.Tag{
         .invalid,
+        .space,
         .identifier,
+    });
+}
+
+test "space" {
+    try testTokenize(" ", &[_]Token.Tag{
+        .space,
+    });
+
+    try testTokenize("\t", &[_]Token.Tag{
+        .space,
+    });
+
+    try testTokenize("\n", &[_]Token.Tag{
+        .space,
+    });
+
+    try testTokenize("\r", &[_]Token.Tag{
+        .space,
+    });
+
+    try testTokenize(" \t\r\n", &[_]Token.Tag{
+        .space,
+    });
+
+    try testTokenize(" \n\r\t", &[_]Token.Tag{
+        .space,
     });
 }
 
 test "identifier" {
     try testTokenize("foo bar", &[_]Token.Tag{
         .identifier,
+        .space,
         .identifier,
-    });
-}
-
-test "number_literal" {
-    try testTokenize("123 83267 0xFF 0b10101 -19", &[_]Token.Tag{
-        .number_literal,
-        .number_literal,
-        .number_literal,
-        .number_literal,
-        .minus,
-        .number_literal,
     });
 }
 
@@ -389,8 +459,37 @@ test "string_literal" {
     try testTokenize("\"asd\", \"asdklj\", \"\\\"foo\\\"\"", &[_]Token.Tag{
         .string_literal,
         .comma,
+        .space,
         .string_literal,
         .comma,
+        .space,
         .string_literal,
+    });
+}
+
+test "number_literal" {
+    try testTokenize("123 83267 -19", &[_]Token.Tag{
+        .number_literal,
+        .space,
+        .number_literal,
+        .space,
+        .minus,
+        .number_literal,
+    });
+}
+
+test "binary_literal" {
+    try testTokenize("0b10101 0B01010", &[_]Token.Tag{
+        .binary_literal,
+        .space,
+        .binary_literal,
+    });
+}
+
+test "hex_literal" {
+    try testTokenize("0xFF 0xFF", &[_]Token.Tag{
+        .hex_literal,
+        .space,
+        .hex_literal,
     });
 }

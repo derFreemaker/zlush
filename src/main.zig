@@ -3,8 +3,9 @@ const builtin = @import("builtin");
 
 const manifest = @import("manifest");
 const zag = @import("zag");
+const Zlush = @import("zlush");
 
-pub const zlush = struct {
+pub const RootCommand = struct {
     no_profile: zag.Flag(.{
         .name = .from('p', "no-profile"),
         .description = "open zlush instance without loading the profile",
@@ -30,14 +31,9 @@ pub fn main(init: std.process.Init) !u8 {
     var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buf);
     const writer = &stdout_writer.interface;
 
-    const args = try zag.parseArgs(zlush, writer, try init.minimal.args.toSlice(init.arena.allocator()), &.{}) orelse {
+    const args = try zag.parseArgs(RootCommand, writer, try init.minimal.args.toSlice(init.arena.allocator()), &.{}) orelse {
         return 1;
     };
-
-    if (args.command.value) |command| {
-        try writer.print("'{s}'\n", .{command});
-        try writer.flush();
-    }
 
     if (args.version.used) {
         try writer.writeAll(manifest.version);
@@ -47,7 +43,27 @@ pub fn main(init: std.process.Init) !u8 {
         return 0;
     }
 
+    if (args.command.value == null) {
+        try writer.writeAll("[WIP] currently requires '-c' or '--command' option to be used in order to invoke commands\n");
+        try writer.flush();
+
+        return 1;
+    }
+
+    var zlush = try Zlush.init(init.gpa, init.io, .{
+        .load_profile = !args.no_profile.set,
+    });
+    defer zlush.deinit();
+
+    try writer.writeAll("TODO execute provided command\n");
+    try writer.flush();
+
     return 0;
+}
+
+test {
+    @setEvalBranchQuota(1_000_000);
+    refAllDeclsRecursive(@This());
 }
 
 /// Given a type, recursively references all the declarations inside, so that the semantic analyzer sees them.
@@ -64,9 +80,4 @@ pub fn refAllDeclsRecursive(comptime T: type) void {
 
         // @compileLog(decl, @field(T, decl.name), T);
     }
-}
-
-test {
-    @setEvalBranchQuota(2_000_000);
-    refAllDeclsRecursive(@This());
 }

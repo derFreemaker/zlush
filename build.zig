@@ -69,11 +69,13 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(exe);
 
     const mod_tests = b.addTest(.{
+        .name = "zlush",
         .root_module = mod,
     });
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const zlush_exe_tests = b.addTest(.{
+        .name = "zlush-exe",
         .root_module = exe_mod,
     });
     const run_exe_tests = b.addRunArtifact(zlush_exe_tests);
