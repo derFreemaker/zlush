@@ -1,9 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const libzlush = @import("libzlush");
 const manifest = @import("manifest");
 const zag = @import("zag");
-const Zlush = @import("zlush");
 
 pub const RootCommand = struct {
     no_profile: zag.Flag(.{
@@ -50,10 +50,19 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     }
 
-    var zlush = try Zlush.init(init.gpa, init.io, .{
+    var zlush = try libzlush.Zlush.init(init.gpa, init.environ_map, .{
         .load_profile = !args.no_profile.set,
     });
     defer zlush.deinit();
+
+    var ctx = try zlush.context(init.gpa);
+    defer ctx.deinit();
+
+    const echo_exec = try ctx.exec(&.{"echo"});
+    try echo_exec.addArgs(&.{"Hello World!"});
+
+    var plan = try ctx.plan(init.gpa);
+    defer plan.deinit();
 
     try writer.writeAll("TODO execute provided command\n");
     try writer.flush();

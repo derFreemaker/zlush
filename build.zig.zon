@@ -5,16 +5,12 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tracy = .{
-            .url = "git+https://codeberg.org/Freemaker/tracy_zig?ref=simplify_options#240d2f0fdce5c332c9eab10f694c6d52d84aef42",
-            .hash = "tracy-1.0.0+0.13.1-R7l8BW9SAQAzf4mkyOjAU3KeN-Na4xTFcctTqs9KCz_h",
-        },
-        .zttio = .{
-            .url = "git+https://github.com/derFreemaker/zttio#6d7d36fe1b12e828829d16003a8e7a0ffe24af23",
-            .hash = "zttio-0.4.0-e5eFcKulAwC5mRS3CydQu8NAYcphZ5hT0AVYXojwkLbG",
+            .url = "git+https://codeberg.org/Freemaker/tracy_zig?ref=simplify_options#add904ad62276ddc36eafb6552db114e95106269",
+            .hash = "tracy-1.0.0+0.13.1-R7l8BQ5TAQDIfWXlCRS2I5S0Pd0dGx8N3CouZ1lPUX-a",
         },
         .zag = .{
-            .url = "git+https://codeberg.org/Freemaker/zag#e92ecafe52d4da9f04b7f856a7591b854993f639",
-            .hash = "zag-0.1.0-vjZt6ACnAQB9HXuwURQJ_cACSLtSvwwrLw1o1hFppnuM",
+            .url = "git+https://codeberg.org/Freemaker/zag#53aa9bc63bda01ea6e9de926f6d85c9055210eed",
+            .hash = "zag-0.1.0-vjZt6DuoAQAQlDvXI32W6xFRZAGBa8rmTyKq2mPkPBN9",
         },
     },
     .paths = .{

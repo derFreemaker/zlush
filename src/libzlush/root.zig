@@ -1,31 +1,11 @@
 const std = @import("std");
 
-const Zlush = @This();
-
-allocator: std.mem.Allocator,
-io: std.Io,
-
-config: Config,
-
-pub fn init(allocator: std.mem.Allocator, io: std.Io, config: Config) error{OutOfMemory}!Zlush {
-    return Zlush{
-        .allocator = allocator,
-        .io = io,
-
-        .config = config,
-    };
-}
-
-pub fn deinit(self: *Zlush) void {
-    _ = self; // autofix
-}
-
-pub const Config = struct {
-    load_profile: bool = true,
-};
+pub const Zlush = @import("Zlush.zig");
 
 test {
     _ = @import("Tokenizer.zig");
+
+    _ = @import("execution/ExecCtx.zig");
 
     @setEvalBranchQuota(1_000_000);
     refAllDeclsRecursive(@This());

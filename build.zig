@@ -7,11 +7,6 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const version = try std.SemanticVersion.parse(manifest.version);
 
-    const zttio_mod = b.dependency("zttio", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("zttio");
-
     const zag_mod = b.dependency("zag", .{
         .target = target,
         .optimize = optimize,
@@ -29,11 +24,11 @@ pub fn build(b: *std.Build) !void {
     });
     const tracy_mod = tracy.module("tracy");
 
-    const mod = b.addModule("zlush", .{
+    const lib_mod = b.addModule("libzlush", .{
         .target = target,
         .optimize = optimize,
 
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/libzlush/root.zig"),
 
         .imports = &.{
             .{ .name = "tracy", .module = tracy_mod },
@@ -44,15 +39,14 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .target = target,
 
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/zlush/main.zig"),
 
         .imports = &.{
             .{ .name = "tracy", .module = tracy_mod },
 
-            .{ .name = "zttio", .module = zttio_mod },
             .{ .name = "zag", .module = zag_mod },
 
-            .{ .name = "zlush", .module = mod },
+            .{ .name = "libzlush", .module = lib_mod },
         },
     });
 
@@ -69,13 +63,13 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(exe);
 
     const mod_tests = b.addTest(.{
-        .name = "zlush",
-        .root_module = mod,
+        .name = "libzlush",
+        .root_module = lib_mod,
     });
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const zlush_exe_tests = b.addTest(.{
-        .name = "zlush-exe",
+        .name = "zlush",
         .root_module = exe_mod,
     });
     const run_exe_tests = b.addRunArtifact(zlush_exe_tests);
