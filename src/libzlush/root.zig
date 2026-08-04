@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const PlanResolver = @import("PlanResolver.zig");
 pub const Zlush = @import("Zlush.zig");
 
 test {

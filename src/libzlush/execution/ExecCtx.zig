@@ -4,11 +4,9 @@ const testing = std.testing;
 
 const IndexT = @import("../index.zig").IndexT;
 const Plan = @import("../Plan.zig");
-const ResolvedPlan = @import("../ResolvedPlan.zig");
+const FileIdx = Plan.FileIdx;
+const ExecIdx = Plan.ExecIdx;
 const Zlush = @import("../Zlush.zig");
-
-const ExecIdx = IndexT(ExecBuilder, u32);
-const FileIdx = IndexT(TrackedFile, u32);
 
 const ExecCtx = @This();
 
@@ -138,10 +136,85 @@ pub fn getExec(self: *const ExecCtx, idx: ExecIdx) *ExecBuilder {
     return &self.executions.items[idx.value()];
 }
 
-pub fn plan(self: *const ExecCtx, allocator: std.mem.Allocator) Allocator.Error!ResolvedPlan {
-    _ = allocator; // autofix
-    _ = self; // autofix
-    @panic("unimplemented");
+pub fn plan(self: *const ExecCtx, allocator: std.mem.Allocator) Allocator.Error!Plan {
+    var plan_env_map = try self.zlush.env_map.clone(allocator);
+    errdefer plan_env_map.deinit();
+
+    var ctx_env_map_iter = self.env_map.iterator();
+    while (ctx_env_map_iter.next()) |entry| {
+        try plan_env_map.put(entry.key_ptr.*, entry.value_ptr.*);
+    }
+
+    var executions = try std.ArrayList(Plan.Execution).initCapacity(allocator, self.executions.items.len);
+    errdefer {
+        for (executions.items) |*execution| {
+            execution.deinit(allocator);
+        }
+        executions.deinit(allocator);
+    }
+    for (self.executions.items) |exec_builder| {
+        var args = try std.ArrayList([]const u8).initCapacity(allocator, exec_builder.args.items.len);
+        errdefer {
+            for (args.items) |arg| {
+                allocator.free(arg);
+            }
+            args.deinit(allocator);
+        }
+        for (exec_builder.args.items) |arg| {
+            args.appendAssumeCapacity(try allocator.dupe(u8, arg));
+        }
+
+        var execution_env_map = try exec_builder.env_map.clone(allocator);
+        errdefer execution_env_map.deinit();
+
+        var stdin = try exec_builder.stdin.clone(allocator);
+        errdefer stdin.deinit(allocator);
+
+        var stdout = try exec_builder.stdout.clone(allocator);
+        errdefer stdout.deinit(allocator);
+
+        var stderr = try exec_builder.stderr.clone(allocator);
+        errdefer stderr.deinit(allocator);
+
+        var depends_on = try exec_builder.depends_on.clone(allocator);
+        errdefer depends_on.deinit(allocator);
+
+        executions.appendAssumeCapacity(Plan.Execution{
+            .args = args,
+            .env_map = execution_env_map,
+
+            .stdin = stdin,
+            .stdout = stdout,
+            .stderr = stderr,
+
+            .depends_on = depends_on,
+        });
+    }
+
+    var tracked_files = try std.ArrayList(Plan.TrackedFile).initCapacity(allocator, self.tracked_files.items.len);
+    errdefer {
+        for (tracked_files.items) |*tracked_file| {
+            tracked_file.deinit(allocator);
+        }
+        tracked_files.deinit(allocator);
+    }
+    for (self.tracked_files.items) |tracked_file| {
+        const path = try allocator.dupe(u8, tracked_file.path);
+
+        tracked_files.appendAssumeCapacity(Plan.TrackedFile{
+            .path = path,
+        });
+    }
+
+    return Plan{
+        .allocator = allocator,
+
+        .env_map = plan_env_map,
+
+        .executions = executions,
+
+        .tracked_files = tracked_files,
+    };
 }
 
 pub const ExecBuilder = struct {
@@ -151,9 +224,9 @@ pub const ExecBuilder = struct {
     args: std.ArrayList([]const u8),
     env_map: std.process.Environ.Map,
 
-    stdin: std.ArrayList(Source),
-    stdout: std.ArrayList(Sink),
-    stderr: std.ArrayList(Sink),
+    stdin: std.ArrayList(Plan.Source),
+    stdout: std.ArrayList(Plan.Sink),
+    stderr: std.ArrayList(Plan.Sink),
 
     depends_on: std.ArrayList(ExecIdx),
 
@@ -251,7 +324,7 @@ pub const ExecBuilder = struct {
         CircleDependency,
     };
 
-    pub fn pipeExec(self: *ExecBuilder, output: Source.ExecSource.Output, to: *ExecBuilder) PipeExecError!void {
+    pub fn pipeExec(self: *ExecBuilder, output: Plan.Source.ExecSource.Output, to: *ExecBuilder) PipeExecError!void {
         if (self.dependsOn(to.idx)) {
             return PipeExecError.CircleDependency;
         }
@@ -295,7 +368,7 @@ pub const ExecBuilder = struct {
 
     pub const ToFileError = Allocator.Error || GetOrCreateFileIdxError;
 
-    pub fn pipeFile(self: *ExecBuilder, io: std.Io, output: Sink.FileSink.Output, path: []const u8) ToFileError!void {
+    pub fn pipeFile(self: *ExecBuilder, io: std.Io, output: Plan.Sink.FileSink.Output, path: []const u8) ToFileError!void {
         const file_idx = try self.ctx.getOrCreateFileIdx(io, path);
         const tracked_file = self.ctx.getFile(file_idx);
         errdefer self.ctx.cleanFile(file_idx);
@@ -343,47 +416,6 @@ pub const ExecBuilder = struct {
         try self.depends_on.append(self.ctx.allocator, other.idx);
         errdefer _ = self.depends_on.pop();
     }
-
-    const Source = union(enum) {
-        execution: ExecSource,
-        file: FileSource,
-
-        const ExecSource = struct {
-            idx: ExecIdx,
-            output: Output,
-
-            pub const Output = struct {
-                stdout: bool = true,
-                stderr: bool = false,
-            };
-        };
-
-        const FileSource = struct {
-            idx: FileIdx,
-            accessor: u32,
-        };
-    };
-
-    const Sink = union(enum) {
-        execution: ExecIdx,
-        file: FileSink,
-
-        const FileSink = struct {
-            idx: FileIdx,
-            accessor: u32,
-            mode: Mode,
-
-            const Mode = enum {
-                append,
-                write_truc,
-            };
-
-            const Output = struct {
-                stdin: ?Mode = .write_truc,
-                stdout: ?Mode = .write_truc,
-            };
-        };
-    };
 };
 
 const TrackedFile = struct {

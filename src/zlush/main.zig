@@ -64,7 +64,12 @@ pub fn main(init: std.process.Init) !u8 {
     var plan = try ctx.plan(init.gpa);
     defer plan.deinit();
 
-    try writer.writeAll("TODO execute provided command\n");
+    var resolver = libzlush.PlanResolver.init(init.gpa, &plan);
+    defer resolver.deinit();
+    // var resolvedPlan = resolver.resolve(init.gpa);
+    // defer resolvedPlan.deinit();
+
+    try writer.writeAll("TODO: resolve plan");
     try writer.flush();
 
     return 0;
