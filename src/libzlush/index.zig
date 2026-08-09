@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn IndexT(comptime ParentT: type, comptime T: type) type {
     // we only need the parent type for uniques
@@ -14,6 +15,22 @@ pub fn IndexT(comptime ParentT: type, comptime T: type) type {
         const Self = @This();
 
         _,
+
+        pub fn fromAny(v: anytype) error{Overflow}!Self {
+            const info = @typeInfo(@TypeOf(v));
+            if (info != .int and info != .float) {
+                @compileError("expected type 'int' or 'float'");
+            }
+
+            if (v > std.math.maxInt(UnderlyingT)) {
+                return error.Overflow;
+            }
+            return switch (info) {
+                .int => @enumFromInt(v),
+                .float => @enumFromInt(@as(UnderlyingT, @intFromFloat(v))),
+                else => unreachable,
+            };
+        }
 
         pub inline fn from(v: T) Self {
             return @enumFromInt(v);

@@ -3,6 +3,13 @@ const std = @import("std");
 const Plan = @import("Plan.zig");
 const ResolvedPlan = @import("ResolvedPlan.zig");
 
+pub fn resolve(allocator: std.mem.Allocator, plan: *const Plan) ResolvedPlan {
+    const resolver = init(allocator, plan);
+    defer resolver.deinit();
+
+    @panic("unimplemented");
+}
+
 const PlanResolver = @This();
 
 allocator: std.mem.Allocator,
@@ -12,7 +19,6 @@ plan: *const Plan,
 lanes: std.ArrayList(Lane),
 
 files: std.ArrayList(TrackedFile),
-files_map: std.hash_map.StringHashMapUnmanaged(usize),
 
 pub fn init(allocator: std.mem.Allocator, plan: *const Plan) PlanResolver {
     return PlanResolver{
@@ -23,7 +29,6 @@ pub fn init(allocator: std.mem.Allocator, plan: *const Plan) PlanResolver {
         .lanes = .empty,
 
         .files = .empty,
-        .files_map = .empty,
     };
 }
 
@@ -37,14 +42,6 @@ pub fn deinit(self: *PlanResolver) void {
         file.deinit(self.allocator);
     }
     self.files.deinit(self.allocator);
-    self.files_map.deinit(self.allocator);
-}
-
-pub fn resolve(self: *const PlanResolver, allocator: std.mem.Allocator) ResolvedPlan {
-    _ = self; // autofix
-    _ = allocator; // autofix
-
-    @panic("unimplemented");
 }
 
 pub const TrackedFile = struct {

@@ -2,17 +2,15 @@ const std = @import("std");
 
 const IndexT = @import("index.zig").IndexT;
 
-pub const FileIdx = IndexT(TrackedFile, u32);
-pub const ExecIdx = IndexT(Execution, u32);
+pub const FileIdx = IndexT(TrackedFile, u16);
+pub const ExecIdx = IndexT(Execution, u16);
 
 const Plan = @This();
 
 allocator: std.mem.Allocator,
 
 env_map: std.process.Environ.Map,
-
 executions: std.ArrayList(Execution),
-
 tracked_files: std.ArrayList(TrackedFile),
 
 pub fn deinit(self: *Plan) void {
@@ -38,7 +36,7 @@ pub const TrackedFile = struct {
 };
 
 pub const Execution = struct {
-    args: std.ArrayList([]const u8),
+    args: std.ArrayList(Arg),
     env_map: std.process.Environ.Map,
 
     stdin: std.ArrayList(Source),
@@ -48,8 +46,8 @@ pub const Execution = struct {
     depends_on: std.ArrayList(ExecIdx),
 
     pub fn deinit(self: *Execution, allocator: std.mem.Allocator) void {
-        for (self.args.items) |arg| {
-            allocator.free(arg);
+        for (self.args.items) |*arg| {
+            arg.deinit(allocator);
         }
         self.args.deinit(allocator);
 
@@ -61,13 +59,25 @@ pub const Execution = struct {
 
         self.depends_on.deinit(allocator);
     }
+
+    pub const Arg = union(enum) {
+        str: []const u8,
+        exec: Source.ExecSource,
+
+        pub fn deinit(self: *Arg, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .str => |str| allocator.free(str),
+                else => {},
+            }
+        }
+    };
 };
 
 pub const Source = union(enum) {
-    execution: ExecSource,
+    exec: ExecSource,
     file: FileSource,
 
-    const ExecSource = struct {
+    pub const ExecSource = struct {
         idx: ExecIdx,
         output: Output,
 
@@ -77,29 +87,24 @@ pub const Source = union(enum) {
         };
     };
 
-    const FileSource = struct {
+    pub const FileSource = struct {
         idx: FileIdx,
         accessor: u32,
     };
 };
 
 pub const Sink = union(enum) {
-    execution: ExecIdx,
+    exec: ExecIdx,
     file: FileSink,
 
-    const FileSink = struct {
+    pub const FileSink = struct {
         idx: FileIdx,
         accessor: u32,
         mode: Mode,
 
-        const Mode = enum {
+        pub const Mode = enum {
             append,
             write_truc,
-        };
-
-        const Output = struct {
-            stdin: ?Mode = .write_truc,
-            stdout: ?Mode = .write_truc,
         };
     };
 };

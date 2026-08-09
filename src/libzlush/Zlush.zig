@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ExecCtx = @import("execution/ExecCtx.zig");
+const ExecCtx = @import("ExecCtx.zig");
 
 const Zlush = @This();
 
@@ -31,7 +31,7 @@ pub fn deinit(self: *Zlush) void {
 }
 
 pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Error!ExecCtx {
-    var ctx = ExecCtx.init(allocator, self);
+    var ctx = try ExecCtx.init(allocator, self);
     errdefer ctx.deinit();
 
     return ctx;
@@ -40,5 +40,5 @@ pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Err
 pub const Config = struct {
     load_profile: bool = true,
 
-    alloc_creating_missing_directories_for_file_creation: bool = false,
+    allow_creating_missing_directories_for_file_creation: bool = false,
 };

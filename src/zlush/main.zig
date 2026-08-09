@@ -58,15 +58,15 @@ pub fn main(init: std.process.Init) !u8 {
     var ctx = try zlush.context(init.gpa);
     defer ctx.deinit();
 
+    const file_test = try ctx.addFile("~/.viminfo");
+
     const echo_exec = try ctx.exec(&.{"echo"});
-    try echo_exec.addArgs(&.{"Hello World!"});
+    try echo_exec.pipeFromFile(file_test);
 
     var plan = try ctx.plan(init.gpa);
     defer plan.deinit();
 
-    var resolver = libzlush.PlanResolver.init(init.gpa, &plan);
-    defer resolver.deinit();
-    // var resolvedPlan = resolver.resolve(init.gpa);
+    // var resolvedPlan = libzlush.PlanResolver.resolve(init.gpa, &plan);
     // defer resolvedPlan.deinit();
 
     try writer.writeAll("TODO: resolve plan");

@@ -2,11 +2,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const IndexT = @import("../index.zig").IndexT;
-const Plan = @import("../Plan.zig");
+const IndexT = @import("index.zig").IndexT;
+const Plan = @import("Plan.zig");
 const FileIdx = Plan.FileIdx;
 const ExecIdx = Plan.ExecIdx;
-const Zlush = @import("../Zlush.zig");
+const Arg = Plan.Execution.Arg;
+const Source = Plan.Source;
+const Sink = Plan.Sink;
+const Zlush = @import("Zlush.zig");
 
 const ExecCtx = @This();
 
@@ -15,30 +18,27 @@ allocator: Allocator,
 zlush: *const Zlush,
 
 env_map: std.process.Environ.Map,
-
 executions: std.ArrayList(ExecBuilder),
-
 tracked_files: std.ArrayList(TrackedFile),
-// TODO: add file path resolve cache to avoid calling the FS for every time
-// files_resolve_cache: std.hash_map.StringHashMap([]const u8),
-tracked_files_map: std.hash_map.StringHashMapUnmanaged(FileIdx),
 
-pub fn init(allocator: Allocator, zlush: *const Zlush) ExecCtx {
+pub fn init(allocator: Allocator, zlush: *const Zlush) Allocator.Error!ExecCtx {
+    var env_map = try zlush.env_map.clone(allocator);
+    errdefer env_map.deinit();
+
     return ExecCtx{
         .allocator = allocator,
 
         .zlush = zlush,
 
-        .env_map = std.process.Environ.Map.init(allocator),
-
+        .env_map = env_map,
         .executions = .empty,
-
         .tracked_files = .empty,
-        .tracked_files_map = .empty,
     };
 }
 
 pub fn deinit(self: *ExecCtx) void {
+    self.env_map.deinit();
+
     for (self.executions.items) |*execution| {
         execution.deinit();
     }
@@ -48,7 +48,6 @@ pub fn deinit(self: *ExecCtx) void {
         tracked_file.deinit(self.allocator);
     }
     self.tracked_files.deinit(self.allocator);
-    self.tracked_files_map.deinit(self.allocator);
 }
 
 pub fn setEnvMap(self: *ExecCtx, env_map: std.process.Environ.Map) Allocator.Error!void {
@@ -66,48 +65,19 @@ pub fn envMap(self: *ExecCtx) *std.process.Environ.Map {
     return &self.env_map;
 }
 
-const GetOrCreateFileIdxError = Allocator.Error || std.Io.File.OpenError || std.Io.File.RealPathError;
-
-fn getOrCreateFileIdx(self: *ExecCtx, io: std.Io, path: []const u8) GetOrCreateFileIdxError!FileIdx {
-    const file = try std.Io.Dir.cwd().openFile(io, path, .{
-        .mode = .read_only,
-        .path_only = true,
-        .allow_directory = false,
-    });
-    defer file.close(self.io);
-
-    var buf: [64 * 1024]u8 = undefined;
-    const buf_realpath = buf[0..try file.realPath(io, &buf)];
-
-    if (self.tracked_files_map.get(buf_realpath)) |idx| {
-        return idx;
-    }
-    const idx: FileIdx = .from(self.tracked_files.items.len);
+pub fn addFile(self: *ExecCtx, path: []const u8) Allocator.Error!FileIdx {
+    const idx = FileIdx.fromAny(self.tracked_files.items.len) catch return Allocator.Error.OutOfMemory;
 
     const tracked_file = try self.tracked_files.addOne(self.allocator);
     errdefer _ = self.tracked_files.pop();
-    tracked_file.* = TrackedFile.init(buf_realpath);
+    tracked_file.* = try TrackedFile.init(self.allocator, path);
     errdefer tracked_file.deinit(self.allocator);
-
-    try self.tracked_files_map.putNoClobber(self.allocator, tracked_file.path, idx);
-    errdefer _ = self.tracked_files_map.remove(tracked_file.path);
 
     return idx;
 }
 
-fn cleanFile(self: *ExecCtx, file_idx: FileIdx) void {
-    const tracked_file = &self.tracked_files.items[file_idx.value()];
-    if (tracked_file.accessed != 0) {
-        return;
-    }
-
-    std.debug.assert(file_idx.value() + 1 == self.tracked_files.items.len);
-    tracked_file.deinit(self.allocator);
-    _ = self.tracked_files.pop();
-}
-
-fn getFile(self: *const ExecCtx, file_idx: FileIdx) *TrackedFile {
-    return &self.ctx.tracked_files.items[file_idx.value()];
+pub fn getFile(self: *const ExecCtx, file_idx: FileIdx) *TrackedFile {
+    return &self.tracked_files.items[file_idx.value()];
 }
 
 pub const ExecCreationError = Allocator.Error || error{
@@ -121,10 +91,7 @@ pub fn exec(self: *ExecCtx, args: []const []const u8) ExecCreationError!*ExecBui
         return ExecCreationError.NoArgProvided;
     }
 
-    if (self.executions.items.len > std.math.maxInt(ExecIdx.UnderlyingT)) {
-        return ExecCreationError.OutOfMemory;
-    }
-    const idx: ExecIdx = .from(@intCast(self.executions.items.len));
+    const idx = ExecIdx.fromAny(self.executions.items.len) catch return ExecCreationError.OutOfMemory;
     const execution = try self.executions.addOne(self.allocator);
     errdefer _ = self.executions.pop();
 
@@ -137,13 +104,8 @@ pub fn getExec(self: *const ExecCtx, idx: ExecIdx) *ExecBuilder {
 }
 
 pub fn plan(self: *const ExecCtx, allocator: std.mem.Allocator) Allocator.Error!Plan {
-    var plan_env_map = try self.zlush.env_map.clone(allocator);
-    errdefer plan_env_map.deinit();
-
-    var ctx_env_map_iter = self.env_map.iterator();
-    while (ctx_env_map_iter.next()) |entry| {
-        try plan_env_map.put(entry.key_ptr.*, entry.value_ptr.*);
-    }
+    var env_map = try self.env_map.clone(allocator);
+    errdefer env_map.deinit();
 
     var executions = try std.ArrayList(Plan.Execution).initCapacity(allocator, self.executions.items.len);
     errdefer {
@@ -153,15 +115,18 @@ pub fn plan(self: *const ExecCtx, allocator: std.mem.Allocator) Allocator.Error!
         executions.deinit(allocator);
     }
     for (self.executions.items) |exec_builder| {
-        var args = try std.ArrayList([]const u8).initCapacity(allocator, exec_builder.args.items.len);
+        var args = try std.ArrayList(Arg).initCapacity(allocator, exec_builder.args.items.len);
         errdefer {
-            for (args.items) |arg| {
-                allocator.free(arg);
+            for (args.items) |*arg| {
+                arg.deinit(allocator);
             }
             args.deinit(allocator);
         }
         for (exec_builder.args.items) |arg| {
-            args.appendAssumeCapacity(try allocator.dupe(u8, arg));
+            args.appendAssumeCapacity(switch (arg) {
+                .str => |str| .{ .str = try allocator.dupe(u8, str) },
+                .exec => |exec_arg| .{ .exec = exec_arg },
+            });
         }
 
         var execution_env_map = try exec_builder.env_map.clone(allocator);
@@ -209,10 +174,8 @@ pub fn plan(self: *const ExecCtx, allocator: std.mem.Allocator) Allocator.Error!
     return Plan{
         .allocator = allocator,
 
-        .env_map = plan_env_map,
-
+        .env_map = env_map,
         .executions = executions,
-
         .tracked_files = tracked_files,
     };
 }
@@ -221,26 +184,27 @@ pub const ExecBuilder = struct {
     idx: ExecIdx,
     ctx: *ExecCtx,
 
-    args: std.ArrayList([]const u8),
+    args: std.ArrayList(Arg),
     env_map: std.process.Environ.Map,
+    // @TODO: add current_working_directory
 
-    stdin: std.ArrayList(Plan.Source),
-    stdout: std.ArrayList(Plan.Sink),
-    stderr: std.ArrayList(Plan.Sink),
+    stdin: std.ArrayList(Source),
+    stdout: std.ArrayList(Sink),
+    stderr: std.ArrayList(Sink),
+    // @TODO: collect stdout/stderr
 
     depends_on: std.ArrayList(ExecIdx),
 
     fn init(idx: ExecIdx, ctx: *ExecCtx, args_slice: []const []const u8) Allocator.Error!ExecBuilder {
-        var args: std.ArrayList([]const u8) = try .initCapacity(ctx.allocator, args_slice.len);
+        var args: std.ArrayList(Arg) = try .initCapacity(ctx.allocator, args_slice.len);
         errdefer {
-            for (args.items) |arg| {
-                ctx.allocator.free(arg);
+            for (args.items) |*arg| {
+                arg.deinit(ctx.allocator);
             }
             args.deinit(ctx.allocator);
         }
         for (args_slice) |arg| {
-            const copy = try ctx.allocator.dupe(u8, arg);
-            args.appendAssumeCapacity(copy);
+            args.appendAssumeCapacity(.{ .str = try ctx.allocator.dupe(u8, arg) });
         }
 
         return ExecBuilder{
@@ -259,8 +223,8 @@ pub const ExecBuilder = struct {
     }
 
     fn deinit(self: *ExecBuilder) void {
-        for (self.args.items) |arg| {
-            self.ctx.allocator.free(arg);
+        for (self.args.items) |*arg| {
+            arg.deinit(self.ctx.allocator);
         }
         self.args.deinit(self.ctx.allocator);
         self.env_map.deinit();
@@ -275,6 +239,40 @@ pub const ExecBuilder = struct {
     fn dependsOn(self: *const ExecBuilder, other: ExecIdx) bool {
         if (self.idx == other) {
             return false;
+        }
+
+        // @TODO: maybe add some kind of cache to avoid checking the same execution again and again.
+
+        for (self.args.items) |arg| {
+            switch (arg) {
+                else => {},
+                .exec => |exec_arg| {
+                    if (exec_arg.idx == other) {
+                        return true;
+                    }
+
+                    const execution = self.ctx.getExec(exec_arg.idx);
+                    if (execution.dependsOn(other)) {
+                        return true;
+                    }
+                },
+            }
+        }
+
+        for (self.stdin.items) |source| {
+            switch (source) {
+                else => {},
+                .exec => |exec_source| {
+                    if (exec_source.idx == other) {
+                        return true;
+                    }
+
+                    const execution = self.ctx.getExec(exec_source.idx);
+                    if (execution.dependsOn(other)) {
+                        return true;
+                    }
+                },
+            }
         }
 
         for (self.depends_on.items) |idx| {
@@ -300,9 +298,25 @@ pub const ExecBuilder = struct {
             self.ctx.allocator.free(args_slice[i]);
         };
         for (args) |arg| {
-            args_slice[arg_i] = try self.ctx.allocator.dupe(u8, arg);
+            args_slice[arg_i] = Arg{ .str = try self.ctx.allocator.dupe(u8, arg) };
             arg_i += 1;
         }
+    }
+
+    pub const ExecOutputAsArgError = Allocator.Error || error{
+        CircleDependency,
+    };
+
+    pub fn addExecOutputAsArg(self: *ExecBuilder, from: *ExecBuilder, output: Source.ExecSource.Output) ExecOutputAsArgError!void {
+        if (self.dependsOn(from.idx)) {
+            return ExecOutputAsArgError.CircleDependency;
+        }
+
+        try self.args.append(self.ctx.allocator, .{ .exec = .{
+            .idx = from.idx,
+            .output = output,
+        } });
+        errdefer _ = self.args.pop();
     }
 
     pub fn setEnvMap(self: *ExecBuilder, env_map: std.process.Environ.Map) Allocator.Error!void {
@@ -331,7 +345,7 @@ pub const ExecBuilder = struct {
 
         const source = try to.stdin.addOne(to.ctx.allocator);
         errdefer _ = to.stdin.pop();
-        source.* = .{ .execution = .{
+        source.* = .{ .exec = .{
             .idx = self.idx,
             .output = output,
         } };
@@ -339,22 +353,18 @@ pub const ExecBuilder = struct {
         if (output.stdout) {
             const sink = try self.stdout.addOne(to.ctx.allocator);
             errdefer _ = self.stdout.pop();
-            sink.* = .{ .execution = to.idx };
+            sink.* = .{ .exec = to.idx };
         }
 
         if (output.stderr) {
             const sink = try self.stderr.addOne(to.ctx.allocator);
             errdefer _ = self.stderr.pop();
-            sink.* = .{ .execution = to.idx };
+            sink.* = .{ .exec = to.idx };
         }
     }
 
-    pub const FromFileError = Allocator.Error || GetOrCreateFileIdxError;
-
-    pub fn pipeFromFile(self: *ExecBuilder, io: std.Io, path: []const u8) FromFileError!void {
-        const file_idx = try self.ctx.getOrCreateFileIdx(io, path);
+    pub fn pipeFromFile(self: *ExecBuilder, file_idx: FileIdx) Allocator.Error!void {
         const tracked_file = self.ctx.getFile(file_idx);
-        errdefer self.ctx.cleanFile(file_idx);
 
         const source = try self.stdin.addOne(self.ctx.allocator);
         errdefer _ = self.stdin.pop();
@@ -366,12 +376,8 @@ pub const ExecBuilder = struct {
         errdefer tracked_file.accessed -= 1;
     }
 
-    pub const ToFileError = Allocator.Error || GetOrCreateFileIdxError;
-
-    pub fn pipeFile(self: *ExecBuilder, io: std.Io, output: Plan.Sink.FileSink.Output, path: []const u8) ToFileError!void {
-        const file_idx = try self.ctx.getOrCreateFileIdx(io, path);
+    pub fn pipeToFile(self: *ExecBuilder, output: Plan.Sink.FileSink.Output, file_idx: FileIdx) Allocator.Error!void {
         const tracked_file = self.ctx.getFile(file_idx);
-        errdefer self.ctx.cleanFile(file_idx);
 
         if (output.stdout) |mode| {
             const sink = try self.stdout.addOne(self.ctx.allocator);
@@ -423,11 +429,11 @@ const TrackedFile = struct {
     accessed: u32 = 0,
 
     fn init(allocator: std.mem.Allocator, path: []const u8) Allocator.Error!TrackedFile {
-        const copy_path = try allocator.dupe(u8, path);
-        errdefer allocator.free(copy_path);
+        const path_copy = try allocator.dupe(u8, path);
+        errdefer allocator.free(path_copy);
 
         return TrackedFile{
-            .path = copy_path,
+            .path = path_copy,
         };
     }
 
@@ -448,7 +454,7 @@ test "cricle dependency" {
     const a = try ctx.exec(&.{"echo"});
 
     const b = try ctx.exec(&.{"cat"});
-    try b.dependOn(a);
+    try b.addExecOutputAsArg(a, .{});
 
     try testing.expectError(ExecBuilder.DependsOnError.CircleDependency, a.dependOn(b));
 }

@@ -6,7 +6,7 @@ pub const Zlush = @import("Zlush.zig");
 test {
     _ = @import("Tokenizer.zig");
 
-    _ = @import("execution/ExecCtx.zig");
+    _ = @import("ExecCtx.zig");
 
     @setEvalBranchQuota(1_000_000);
     refAllDeclsRecursive(@This());
