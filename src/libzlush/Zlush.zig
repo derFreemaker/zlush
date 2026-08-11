@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ExecCtx = @import("ExecCtx.zig");
+const Ctx = @import("Ctx.zig");
 
 const Zlush = @This();
 
@@ -30,8 +30,10 @@ pub fn deinit(self: *Zlush) void {
     self.env_map.deinit();
 }
 
-pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Error!ExecCtx {
-    var ctx = try ExecCtx.init(allocator, self);
+pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Error!Ctx {
+    _ = self; // autofix
+
+    var ctx = Ctx.init(allocator);
     errdefer ctx.deinit();
 
     return ctx;

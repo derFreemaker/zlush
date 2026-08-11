@@ -18,16 +18,15 @@ pub fn IndexT(comptime ParentT: type, comptime T: type) type {
 
         pub fn fromAny(v: anytype) error{Overflow}!Self {
             const info = @typeInfo(@TypeOf(v));
-            if (info != .int and info != .float) {
-                @compileError("expected type 'int' or 'float'");
+            if (info != .int) {
+                @compileError("expected type 'int'");
             }
 
-            if (v > std.math.maxInt(UnderlyingT)) {
+            if (v < 0 or v > std.math.maxInt(UnderlyingT)) {
                 return error.Overflow;
             }
             return switch (info) {
                 .int => @enumFromInt(v),
-                .float => @enumFromInt(@as(UnderlyingT, @intFromFloat(v))),
                 else => unreachable,
             };
         }
@@ -38,19 +37,6 @@ pub fn IndexT(comptime ParentT: type, comptime T: type) type {
 
         pub inline fn value(self: Self) T {
             return @intFromEnum(self);
-        }
-
-        /// Does a saturating subtraction.
-        pub inline fn sub(self: Self, n: T) Self {
-            return Self.from(self.value() -| n);
-        }
-
-        pub inline fn add(self: Self, n: T) Self {
-            return Self.from(self.value() + n);
-        }
-
-        pub inline fn inc(self: *Self, n: T) void {
-            self.* = .from(self.value() + n);
         }
 
         pub inline fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -73,6 +59,21 @@ pub fn OptIndexT(comptime ParentT: type, comptime T: type) type {
 
         invalid = 0,
         _,
+
+        pub fn fromAny(v: anytype) error{Overflow}!Self {
+            const info = @typeInfo(@TypeOf(v));
+            if (info != .int) {
+                @compileError("expected type 'int'");
+            }
+
+            if (v < 0 or v > std.math.maxInt(UnderlyingT)) {
+                return error.Overflow;
+            }
+            return switch (info) {
+                .int => @enumFromInt(v),
+                else => unreachable,
+            };
+        }
 
         pub inline fn from(idx: Index) Self {
             return @enumFromInt(@intFromEnum(idx));

@@ -21,9 +21,9 @@ pub const RootCommand = struct {
         .description = "print version number and exit",
     }, void) = .{},
 
-    _: zag.Effects = .{
-        .help_on_empty_args = true,
-    },
+    // _: zag.Effects = .{
+    //     .help_on_empty_args = true,
+    // },
 };
 
 pub fn main(init: std.process.Init) !u8 {
@@ -58,13 +58,13 @@ pub fn main(init: std.process.Init) !u8 {
     var ctx = try zlush.context(init.gpa);
     defer ctx.deinit();
 
-    const file_test = try ctx.addFile("~/.viminfo");
+    const file_test = try ctx.registerFile("~/.viminfo");
 
-    const echo_exec = try ctx.exec(&.{"echo"});
-    try echo_exec.pipeFromFile(file_test);
+    const echo_exec = try ctx.exec(&.{"echo"}, null);
+    try file_test.pipe(&echo_exec, .{});
 
-    var plan = try ctx.plan(init.gpa);
-    defer plan.deinit();
+    // var plan = try ctx.plan(init.gpa);
+    // defer plan.deinit();
 
     // var resolvedPlan = libzlush.PlanResolver.resolve(init.gpa, &plan);
     // defer resolvedPlan.deinit();
