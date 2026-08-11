@@ -124,9 +124,154 @@ pub fn exec(self: *Ctx, args: []const []const u8, env_map: ?*const std.process.E
 }
 
 pub fn plan(self: *const Ctx, allocator: Allocator) Allocator.Error!Pl {
-    _ = self; // autofix
-    _ = allocator; // autofix
-    @panic("unimplemented");
+    var node_i: usize = 0;
+    const nodes = try allocator.alloc(Pl.Node, self.nodes.data.items.len);
+    errdefer {
+        for (nodes[0..node_i]) |*node| {
+            node.deinit(allocator);
+        }
+        allocator.free(nodes);
+    }
+    for (self.nodes.data.items) |node| {
+        const copy = &nodes[node_i];
+
+        switch (node.data) {
+            .exec => |execution| {
+                const ArgSlot = Pl.Node.Data.Execution.ArgSlot;
+
+                var arg_i: usize = 0;
+                const args = try allocator.alloc(ArgSlot, execution.args.items.len);
+                errdefer {
+                    for (args[0..arg_i]) |*arg| {
+                        arg.deinit(allocator);
+                    }
+                    allocator.free(args);
+                }
+                for (execution.args.items) |arg| {
+                    switch (arg) {
+                        .literal => |literal| args[arg_i] = ArgSlot{
+                            .literal = try allocator.dupe(u8, literal),
+                        },
+
+                        .captured => |captured| args[arg_i] = ArgSlot{ .captured = Pl.EdgeIdx.from(captured.value()) },
+
+                        .start_concat,
+                        .end_concat,
+                        => args[arg_i] = arg,
+                    }
+
+                    arg_i += 1;
+                }
+
+                var env = try execution.env.clone(allocator);
+                errdefer env.deinit();
+
+                copy.data = .{ .exec = .{
+                    .args = args,
+                    .env = env,
+                    .collect_stdout = execution.collect_stdout,
+                    .collect_stderr = execution.collect_stderr,
+                } };
+            },
+            .file => |file| {
+                const path = try allocator.dupe(u8, file.path);
+                errdefer allocator.free(path);
+
+                copy.data = .{ .file = .{
+                    .path = path,
+                } };
+            },
+        }
+        errdefer copy.data.deinit(allocator);
+
+        copy.sources = try allocator.alloc(Pl.EdgeIdx, node.sources.items.len);
+        errdefer allocator.free(copy.sources);
+        for (node.sources.items, 0..) |source, i| {
+            copy.sources[i] = Pl.EdgeIdx.from(source.value());
+        }
+
+        copy.sinks = try allocator.alloc(Pl.EdgeIdx, node.sinks.items.len);
+        errdefer allocator.free(copy.sinks);
+        for (node.sinks.items, 0..) |sink, i| {
+            copy.sinks[i] = Pl.EdgeIdx.from(sink.value());
+        }
+
+        copy.depends_on = try allocator.alloc(Pl.Dependency, node.depends_on.items.len);
+        errdefer allocator.free(copy.depends_on);
+        for (node.depends_on.items, 0..) |dep, i| {
+            copy.depends_on[i] = Pl.Dependency{
+                .idx = Pl.EdgeIdx.from(dep.idx.value()),
+                .kind = dep.kind,
+            };
+        }
+
+        node_i += 1;
+    }
+
+    var edge_i: usize = 0;
+    const edges = try allocator.alloc(Pl.Edge, self.edges.data.items.len);
+    errdefer {
+        for (edges[0..edge_i]) |*edge| {
+            edge.deinit(allocator);
+        }
+        allocator.free(edges);
+    }
+    for (self.edges.data.items) |edge| {
+        const copy = &edges[edge_i];
+
+        copy.source = Pl.NodeIdx.from(edge.source.value());
+        copy.target = Pl.NodeIdx.from(edge.target.value());
+
+        switch (edge.source_data) {
+            .exec => |execution| {
+                copy.source_data = .{ .exec = .{
+                    .output = execution.output,
+                } };
+            },
+            .file => |file| {
+                const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
+                errdefer if (path) |p| allocator.free(p);
+
+                copy.source_data = .{ .file = .{
+                    .path = path,
+                } };
+            },
+        }
+        errdefer copy.source_data.deinit(allocator);
+
+        switch (edge.target_data) {
+            .exec => |execution| {
+                const role: Pl.Edge.TargetData.Execution.Role = switch (execution.role) {
+                    .stdin => .stdin,
+                    .arg => |arg| .{ .arg = .{
+                        .idx = arg.idx,
+                        .trim = arg.trim,
+                    } },
+                };
+
+                copy.target_data = .{ .exec = .{
+                    .role = role,
+                } };
+            },
+            .file => |file| {
+                const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
+                errdefer if (path) |p| allocator.free(p);
+
+                copy.target_data = .{ .file = .{
+                    .mode = file.mode,
+                    .path = path,
+                } };
+            },
+        }
+        errdefer copy.target_data.deinit(allocator);
+
+        edge_i += 1;
+    }
+
+    return Pl{
+        .nodes = nodes,
+        .edges = edges,
+    };
 }
 
 pub const ExecBuilder = struct {

@@ -63,8 +63,8 @@ pub fn main(init: std.process.Init) !u8 {
     const echo_exec = try ctx.exec(&.{"echo"}, null);
     try file_test.pipe(&echo_exec, .{});
 
-    // var plan = try ctx.plan(init.gpa);
-    // defer plan.deinit();
+    var plan = try ctx.plan(init.gpa);
+    defer plan.deinit(init.gpa);
 
     // var resolvedPlan = libzlush.PlanResolver.resolve(init.gpa, &plan);
     // defer resolvedPlan.deinit();
