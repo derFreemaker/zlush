@@ -3,22 +3,38 @@ const std = @import("std");
 const IndexT = @import("index.zig").IndexT;
 
 pub const NodeIdx = IndexT(Node, u16);
+
+pub const SourceIdx = IndexT(Source, u16);
+pub const SinkIdx = IndexT(Sink, u16);
+
 pub const EdgeIdx = IndexT(Edge, u16);
 
-const Plan = @This();
+// Plan
+const Pl = @This();
 
 nodes: []Node,
+
+sources: []Source,
+sinks: []Sink,
+
 edges: []Edge,
 
-pub fn deinit(self: *Plan, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Pl, allocator: std.mem.Allocator) void {
     for (self.nodes) |*node| {
         node.deinit(allocator);
     }
     allocator.free(self.nodes);
 
-    for (self.edges) |*edge| {
-        edge.deinit(allocator);
+    for (self.sources) |*source| {
+        source.deinit(allocator);
     }
+    allocator.free(self.sources);
+
+    for (self.sinks) |*sink| {
+        sink.deinit(allocator);
+    }
+    allocator.free(self.sinks);
+
     allocator.free(self.edges);
 }
 
@@ -68,7 +84,7 @@ pub const Node = struct {
 
             pub const ArgSlot = union(enum) {
                 literal: []const u8,
-                captured: EdgeIdx,
+                captured: SinkIdx,
                 start_concat,
                 end_concat,
 
@@ -91,22 +107,20 @@ pub const Node = struct {
     };
 };
 
-pub const Edge = struct {
-    source: NodeIdx,
-    target: NodeIdx,
-    source_data: SourceData,
-    target_data: TargetData,
+pub const Source = struct {
+    node: NodeIdx,
+    data: Data,
+    sinks_count: usize,
 
-    pub fn deinit(self: *Edge, allocator: std.mem.Allocator) void {
-        self.source_data.deinit(allocator);
-        self.target_data.deinit(allocator);
+    pub fn deinit(self: *Source, allocator: std.mem.Allocator) void {
+        self.data.deinit(allocator);
     }
 
-    pub const SourceData = union(enum) {
-        exec: Execution,
+    pub const Data = union(enum) {
+        exec: ExecutionOutput,
         file: File,
 
-        pub fn deinit(self: *SourceData, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Data, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .file => |file| {
                     if (file.path) |path| {
@@ -117,25 +131,30 @@ pub const Edge = struct {
             }
         }
 
-        pub const Execution = struct {
-            output: Output,
-
-            pub const Output = struct {
-                stdout: bool,
-                stderr: bool,
-            };
+        pub const ExecutionOutput = enum {
+            stderr,
+            stdout,
         };
 
         pub const File = struct {
             path: ?[]const u8 = null,
         };
     };
+};
 
-    pub const TargetData = union(enum) {
+pub const Sink = struct {
+    node: NodeIdx,
+    data: Data,
+
+    pub fn deinit(self: *Sink, allocator: std.mem.Allocator) void {
+        self.data.deinit(allocator);
+    }
+
+    pub const Data = union(enum) {
         exec: Execution,
         file: File,
 
-        pub fn deinit(self: *TargetData, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Data, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .file => |file| {
                     if (file.path) |path| {
@@ -175,6 +194,11 @@ pub const Edge = struct {
             };
         };
     };
+};
+
+pub const Edge = struct {
+    source: SourceIdx,
+    sink: SinkIdx,
 };
 
 pub const Dependency = struct {

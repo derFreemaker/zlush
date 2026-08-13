@@ -7,14 +7,27 @@ const StableList = @import("stable_list.zig").StableList;
 
 const NodeList = StableList(Node, Pl.NodeIdx.UnderlyingT);
 const NodeIdx = NodeList.Index;
+const SourceList = StableList(Source, Pl.SourceIdx.UnderlyingT);
+const SourceIdx = SourceList.Index;
+const SinkList = StableList(Sink, Pl.SinkIdx.UnderlyingT);
+const SinkIdx = SinkList.Index;
 const EdgeList = StableList(Edge, Pl.EdgeIdx.UnderlyingT);
 const EdgeIdx = EdgeList.Index;
 
 const Ctx = @This();
 
+// @TODO: rework hash map situation
+
 allocator: Allocator,
 
 nodes: NodeList,
+
+sources: SourceList,
+source_map: std.HashMapUnmanaged(SourceKey, SourceIdx, SourceHashContext, 80),
+
+sinks: SinkList,
+sink_map: std.HashMapUnmanaged(SinkKey, SinkIdx, SinkHashContext, 80),
+
 edges: EdgeList,
 
 pub fn init(allocator: Allocator) Ctx {
@@ -22,6 +35,13 @@ pub fn init(allocator: Allocator) Ctx {
         .allocator = allocator,
 
         .nodes = .empty,
+
+        .sources = .empty,
+        .source_map = .empty,
+
+        .sinks = .empty,
+        .sink_map = .empty,
+
         .edges = .empty,
     };
 }
@@ -31,6 +51,18 @@ pub fn deinit(self: *Ctx) void {
         node.deinit(self.allocator);
     }
     self.nodes.deinit(self.allocator);
+
+    self.source_map.deinit(self.allocator);
+    for (self.sources.data.items) |*source| {
+        source.deinit(self.allocator);
+    }
+    self.sources.deinit(self.allocator);
+
+    self.sink_map.deinit(self.allocator);
+    for (self.sinks.data.items) |*sink| {
+        sink.deinit(self.allocator);
+    }
+    self.sinks.deinit(self.allocator);
 
     self.edges.deinit(self.allocator);
 }
@@ -95,6 +127,176 @@ fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, kind: Pl.Dependency.Kind) Depend
     return result;
 }
 
+fn getOrCreateSource(self: *Ctx, key: SourceKey) Allocator.Error!SourceResult {
+    const result = try self.source_map.getOrPut(self.allocator, key);
+    errdefer if (!result.found_existing) {
+        _ = self.source_map.remove(key);
+    };
+    if (result.found_existing) {
+        return SourceResult{
+            .key = key,
+            .idx = result.value_ptr.*,
+            .created = false,
+        };
+    }
+
+    const idx = try self.sources.append(self.allocator, Source{
+        .node = key.node,
+        .data = switch (key.data) {
+            .exec => |execution| .{ .exec = execution },
+            .file => |file| blk: {
+                const path = if (file.path) |path| try self.allocator.dupe(u8, path) else null;
+                errdefer if (path) |p| self.allocator.free(p);
+
+                break :blk .{ .file = .{
+                    .path = path,
+                } };
+            },
+        },
+    });
+    errdefer {
+        const source = self.sources.get(idx);
+        source.deinit(self.allocator);
+        self.sources.pop();
+    }
+
+    result.value_ptr.* = idx;
+    return SourceResult{
+        .key = key,
+        .idx = idx,
+        .created = true,
+    };
+}
+
+pub const SourceResult = struct {
+    key: SourceKey,
+    idx: SourceIdx,
+    created: bool,
+
+    pub fn deinit(self: *const SourceResult, ctx: *Ctx) void {
+        if (!self.created) {
+            return;
+        }
+
+        _ = ctx.source_map.remove(self.key);
+
+        const source = ctx.sources.get(self.idx);
+        defer ctx.sources.pop();
+        source.deinit(ctx.allocator);
+    }
+};
+
+fn getOrCreateSink(self: *Ctx, key: SinkKey) Allocator.Error!SinkResult {
+    const result = try self.sink_map.getOrPut(self.allocator, key);
+    errdefer if (!result.found_existing) {
+        _ = self.sink_map.remove(key);
+    };
+    if (result.found_existing) {
+        return SinkResult{
+            .key = key,
+            .idx = result.value_ptr.*,
+            .created = false,
+        };
+    }
+
+    const idx = try self.sinks.append(self.allocator, Sink{
+        .node = key.node,
+        .data = switch (key.data) {
+            .exec => |execution| .{ .exec = execution },
+            .file => |file| blk: {
+                const path = if (file.path) |path| try self.allocator.dupe(u8, path) else null;
+                errdefer if (path) |p| self.allocator.free(p);
+
+                break :blk .{ .file = .{
+                    .path = path,
+                } };
+            },
+        },
+    });
+    errdefer {
+        const sink = self.sinks.get(idx);
+        sink.deinit(self.allocator);
+        self.sinks.pop();
+    }
+
+    result.value_ptr.* = idx;
+    return SinkResult{
+        .key = key,
+        .idx = idx,
+        .created = true,
+    };
+}
+
+pub const SinkResult = struct {
+    key: SinkKey,
+    idx: SinkIdx,
+    created: bool,
+
+    pub fn deinit(self: *const SinkResult, ctx: *Ctx) void {
+        if (!self.created) {
+            return;
+        }
+
+        _ = ctx.sink_map.remove(self.key);
+
+        const sink = ctx.sinks.get(self.idx);
+        defer ctx.sinks.pop();
+        sink.deinit(ctx.allocator);
+    }
+};
+
+fn addEdge(self: *Ctx, source_key: SourceKey, sink_key: SinkKey) Allocator.Error!EdgeResult {
+    const source_result = try self.getOrCreateSource(source_key);
+    errdefer source_result.deinit(self);
+
+    const sink_result = try self.getOrCreateSink(sink_key);
+    errdefer sink_result.deinit(self);
+
+    const idx = try self.edges.append(self.allocator, Edge{
+        .source = source_result.idx,
+        .sink = sink_result.idx,
+    });
+    errdefer self.edges.pop();
+
+    const source_node = self.nodes.get(source_key.node);
+    try source_node.sinks.append(self.allocator, idx);
+    errdefer _ = source_node.sinks.pop();
+
+    const sink_node = self.nodes.get(sink_key.node);
+    try sink_node.sources.append(self.allocator, idx);
+    errdefer _ = sink_node.sources.pop();
+
+    const source = self.sources.get(source_result.idx);
+    source.sinks_count += 1;
+    errdefer source.sinks_count -= 1;
+
+    return EdgeResult{
+        .idx = idx,
+        .source_result = source_result,
+        .sink_result = sink_result,
+    };
+}
+
+pub const EdgeResult = struct {
+    idx: EdgeIdx,
+    source_result: SourceResult,
+    sink_result: SinkResult,
+
+    pub fn deinit(self: *const EdgeResult, ctx: *Ctx) void {
+        ctx.edges.pop();
+
+        const source = ctx.sources.get(self.source_result.idx);
+        source.sinks_count -= 1;
+        self.source_result.deinit(ctx);
+        const source_node = ctx.nodes.get(self.source_result.key.node);
+        _ = source_node.sinks.pop();
+
+        self.sink_result.deinit(ctx);
+        const sink_node = ctx.nodes.get(self.sink_result.key.node);
+        _ = sink_node.sources.pop();
+    }
+};
+
 pub fn registerFile(self: *Ctx, path: []const u8) Allocator.Error!FileIdx {
     const copy = try self.allocator.dupe(u8, path);
     errdefer self.allocator.free(copy);
@@ -123,156 +325,156 @@ pub fn exec(self: *Ctx, args: []const []const u8, env_map: ?*const std.process.E
     return try ExecBuilder.init(self, args, env_map);
 }
 
-pub fn plan(self: *const Ctx, allocator: Allocator) Allocator.Error!Pl {
-    var node_i: usize = 0;
-    const nodes = try allocator.alloc(Pl.Node, self.nodes.data.items.len);
-    errdefer {
-        for (nodes[0..node_i]) |*node| {
-            node.deinit(allocator);
-        }
-        allocator.free(nodes);
-    }
-    for (self.nodes.data.items) |node| {
-        const copy = &nodes[node_i];
+// pub fn plan(self: *const Ctx, allocator: Allocator) Allocator.Error!Pl {
+//     var node_i: usize = 0;
+//     const nodes = try allocator.alloc(Pl.Node, self.nodes.data.items.len);
+//     errdefer {
+//         for (nodes[0..node_i]) |*node| {
+//             node.deinit(allocator);
+//         }
+//         allocator.free(nodes);
+//     }
+//     for (self.nodes.data.items) |node| {
+//         const copy = &nodes[node_i];
 
-        switch (node.data) {
-            .exec => |execution| {
-                const ArgSlot = Pl.Node.Data.Execution.ArgSlot;
+//         switch (node.data) {
+//             .exec => |execution| {
+//                 const ArgSlot = Pl.Node.Data.Execution.ArgSlot;
 
-                var arg_i: usize = 0;
-                const args = try allocator.alloc(ArgSlot, execution.args.items.len);
-                errdefer {
-                    for (args[0..arg_i]) |*arg| {
-                        arg.deinit(allocator);
-                    }
-                    allocator.free(args);
-                }
-                for (execution.args.items) |arg| {
-                    switch (arg) {
-                        .literal => |literal| args[arg_i] = ArgSlot{
-                            .literal = try allocator.dupe(u8, literal),
-                        },
+//                 var arg_i: usize = 0;
+//                 const args = try allocator.alloc(ArgSlot, execution.args.items.len);
+//                 errdefer {
+//                     for (args[0..arg_i]) |*arg| {
+//                         arg.deinit(allocator);
+//                     }
+//                     allocator.free(args);
+//                 }
+//                 for (execution.args.items) |arg| {
+//                     switch (arg) {
+//                         .literal => |literal| args[arg_i] = ArgSlot{
+//                             .literal = try allocator.dupe(u8, literal),
+//                         },
 
-                        .captured => |captured| args[arg_i] = ArgSlot{ .captured = Pl.EdgeIdx.from(captured.value()) },
+//                         .captured => |captured| args[arg_i] = ArgSlot{ .captured = Pl.EdgeIdx.from(captured.value()) },
 
-                        .start_concat,
-                        .end_concat,
-                        => args[arg_i] = arg,
-                    }
+//                         .start_concat,
+//                         .end_concat,
+//                         => args[arg_i] = arg,
+//                     }
 
-                    arg_i += 1;
-                }
+//                     arg_i += 1;
+//                 }
 
-                var env = try execution.env.clone(allocator);
-                errdefer env.deinit();
+//                 var env = try execution.env.clone(allocator);
+//                 errdefer env.deinit();
 
-                copy.data = .{ .exec = .{
-                    .args = args,
-                    .env = env,
-                    .collect_stdout = execution.collect_stdout,
-                    .collect_stderr = execution.collect_stderr,
-                } };
-            },
-            .file => |file| {
-                const path = try allocator.dupe(u8, file.path);
-                errdefer allocator.free(path);
+//                 copy.data = .{ .exec = .{
+//                     .args = args,
+//                     .env = env,
+//                     .collect_stdout = execution.collect_stdout,
+//                     .collect_stderr = execution.collect_stderr,
+//                 } };
+//             },
+//             .file => |file| {
+//                 const path = try allocator.dupe(u8, file.path);
+//                 errdefer allocator.free(path);
 
-                copy.data = .{ .file = .{
-                    .path = path,
-                } };
-            },
-        }
-        errdefer copy.data.deinit(allocator);
+//                 copy.data = .{ .file = .{
+//                     .path = path,
+//                 } };
+//             },
+//         }
+//         errdefer copy.data.deinit(allocator);
 
-        copy.sources = try allocator.alloc(Pl.EdgeIdx, node.sources.items.len);
-        errdefer allocator.free(copy.sources);
-        for (node.sources.items, 0..) |source, i| {
-            copy.sources[i] = Pl.EdgeIdx.from(source.value());
-        }
+//         copy.sources = try allocator.alloc(Pl.EdgeIdx, node.sources.items.len);
+//         errdefer allocator.free(copy.sources);
+//         for (node.sources.items, 0..) |source, i| {
+//             copy.sources[i] = Pl.EdgeIdx.from(source.value());
+//         }
 
-        copy.sinks = try allocator.alloc(Pl.EdgeIdx, node.sinks.items.len);
-        errdefer allocator.free(copy.sinks);
-        for (node.sinks.items, 0..) |sink, i| {
-            copy.sinks[i] = Pl.EdgeIdx.from(sink.value());
-        }
+//         copy.sinks = try allocator.alloc(Pl.EdgeIdx, node.sinks.items.len);
+//         errdefer allocator.free(copy.sinks);
+//         for (node.sinks.items, 0..) |sink, i| {
+//             copy.sinks[i] = Pl.EdgeIdx.from(sink.value());
+//         }
 
-        copy.depends_on = try allocator.alloc(Pl.Dependency, node.depends_on.items.len);
-        errdefer allocator.free(copy.depends_on);
-        for (node.depends_on.items, 0..) |dep, i| {
-            copy.depends_on[i] = Pl.Dependency{
-                .idx = Pl.EdgeIdx.from(dep.idx.value()),
-                .kind = dep.kind,
-            };
-        }
+//         copy.depends_on = try allocator.alloc(Pl.Dependency, node.depends_on.items.len);
+//         errdefer allocator.free(copy.depends_on);
+//         for (node.depends_on.items, 0..) |dep, i| {
+//             copy.depends_on[i] = Pl.Dependency{
+//                 .idx = Pl.EdgeIdx.from(dep.idx.value()),
+//                 .kind = dep.kind,
+//             };
+//         }
 
-        node_i += 1;
-    }
+//         node_i += 1;
+//     }
 
-    var edge_i: usize = 0;
-    const edges = try allocator.alloc(Pl.Edge, self.edges.data.items.len);
-    errdefer {
-        for (edges[0..edge_i]) |*edge| {
-            edge.deinit(allocator);
-        }
-        allocator.free(edges);
-    }
-    for (self.edges.data.items) |edge| {
-        const copy = &edges[edge_i];
+//     var edge_i: usize = 0;
+//     const edges = try allocator.alloc(Pl.Edge, self.edges.data.items.len);
+//     errdefer {
+//         for (edges[0..edge_i]) |*edge| {
+//             edge.deinit(allocator);
+//         }
+//         allocator.free(edges);
+//     }
+//     for (self.edges.data.items) |edge| {
+//         const copy = &edges[edge_i];
 
-        copy.source = Pl.NodeIdx.from(edge.source.value());
-        copy.target = Pl.NodeIdx.from(edge.target.value());
+//         copy.source = Pl.NodeIdx.from(edge.source.value());
+//         copy.target = Pl.NodeIdx.from(edge.target.value());
 
-        switch (edge.source_data) {
-            .exec => |execution| {
-                copy.source_data = .{ .exec = .{
-                    .output = execution.output,
-                } };
-            },
-            .file => |file| {
-                const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
-                errdefer if (path) |p| allocator.free(p);
+//         switch (edge.source_data) {
+//             .exec => |execution| {
+//                 copy.source_data = .{ .exec = .{
+//                     .output = execution.output,
+//                 } };
+//             },
+//             .file => |file| {
+//                 const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
+//                 errdefer if (path) |p| allocator.free(p);
 
-                copy.source_data = .{ .file = .{
-                    .path = path,
-                } };
-            },
-        }
-        errdefer copy.source_data.deinit(allocator);
+//                 copy.source_data = .{ .file = .{
+//                     .path = path,
+//                 } };
+//             },
+//         }
+//         errdefer copy.source_data.deinit(allocator);
 
-        switch (edge.target_data) {
-            .exec => |execution| {
-                const role: Pl.Edge.TargetData.Execution.Role = switch (execution.role) {
-                    .stdin => .stdin,
-                    .arg => |arg| .{ .arg = .{
-                        .idx = arg.idx,
-                        .trim = arg.trim,
-                    } },
-                };
+//         switch (edge.target_data) {
+//             .exec => |execution| {
+//                 const role: Pl.Edge.TargetData.Execution.Role = switch (execution.role) {
+//                     .stdin => .stdin,
+//                     .arg => |arg| .{ .arg = .{
+//                         .idx = arg.idx,
+//                         .trim = arg.trim,
+//                     } },
+//                 };
 
-                copy.target_data = .{ .exec = .{
-                    .role = role,
-                } };
-            },
-            .file => |file| {
-                const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
-                errdefer if (path) |p| allocator.free(p);
+//                 copy.target_data = .{ .exec = .{
+//                     .role = role,
+//                 } };
+//             },
+//             .file => |file| {
+//                 const path = if (file.path) |path| try allocator.dupe(u8, path) else null;
+//                 errdefer if (path) |p| allocator.free(p);
 
-                copy.target_data = .{ .file = .{
-                    .mode = file.mode,
-                    .path = path,
-                } };
-            },
-        }
-        errdefer copy.target_data.deinit(allocator);
+//                 copy.target_data = .{ .file = .{
+//                     .mode = file.mode,
+//                     .path = path,
+//                 } };
+//             },
+//         }
+//         errdefer copy.target_data.deinit(allocator);
 
-        edge_i += 1;
-    }
+//         edge_i += 1;
+//     }
 
-    return Pl{
-        .nodes = nodes,
-        .edges = edges,
-    };
-}
+//     return Pl{
+//         .nodes = nodes,
+//         .edges = edges,
+//     };
+// }
 
 pub const ExecBuilder = struct {
     ctx: *Ctx,
@@ -348,33 +550,62 @@ pub const ExecBuilder = struct {
 
         const data = self.getData();
 
-        const edge_idx = try self.ctx.edges.append(self.ctx.allocator, Edge{
-            .source = from.idx,
-            .target = self.idx,
-            .source_data = .{ .exec = .{
-                .output = config.output,
-            } },
-            .target_data = .{ .exec = .{
+        // @TODO: redecide if using a Sink as collection point is really optimial,
+        //     it should allow us to take advantage of the entire piping system though
+
+        const sink_key = SinkKey{
+            .node = self.idx,
+            .data = .{ .exec = .{
                 .role = .{ .arg = .{
                     .idx = data.args.items.len,
                     .trim = config.trim,
                 } },
             } },
-        });
-        errdefer self.ctx.edges.pop();
+        };
+        const sink_result = try self.ctx.getOrCreateSink(sink_key);
+        errdefer sink_result.deinit(self.ctx);
+
+        var stdout_edge_result: ?EdgeResult = null;
+        errdefer if (stdout_edge_result) |result| result.deinit(self.ctx);
+        if (config.stdout) {
+            stdout_edge_result = try self.ctx.addEdge(
+                SourceKey{
+                    .node = from.idx,
+                    .data = .{ .exec = .stdout },
+                },
+                sink_key,
+            );
+
+            // @TODO: rollback on errdefer
+            from.collectStdout();
+        }
+
+        var stderr_edge_result: ?EdgeResult = null;
+        errdefer if (stderr_edge_result) |result| result.deinit(self.ctx);
+        if (config.stderr) {
+            stderr_edge_result = try self.ctx.addEdge(
+                SourceKey{
+                    .node = from.idx,
+                    .data = .{ .exec = .stderr },
+                },
+                sink_key,
+            );
+
+            // @TODO: rollback on errdefer
+            from.collectStderr();
+        }
 
         try data.args.append(self.ctx.allocator, Pl.Node.Data.Execution.ArgSlot{
-            .captured = edge_idx,
+            .captured = sink_result.idx,
         });
         errdefer _ = data.args.pop();
     }
 
     pub const AddExecOutputAsArgConfig = struct {
-        output: Pl.Edge.SourceData.Execution.Output = .{
-            .stdout = true,
-            .stderr = false,
-        },
-        trim: Pl.Edge.TargetData.Execution.Role.Arg.Trim = .trim_newlines,
+        stdout: bool = true,
+        stderr: bool = false,
+
+        trim: Pl.Sink.Data.Execution.Role.Arg.Trim = .trim_newlines,
     };
 
     pub fn setEnvMap(self: *const ExecBuilder, env_map: std.process.Environ.Map) Allocator.Error!void {
@@ -393,85 +624,65 @@ pub const ExecBuilder = struct {
         return &self.getData().env;
     }
 
-    // @TODO: rewise piping api
+    pub fn collectStdout(self: *const ExecBuilder) void {
+        self.getData().collect_stdout = true;
+    }
+
+    pub fn collectStderr(self: *const ExecBuilder) void {
+        self.getData().collect_stderr = true;
+    }
+
+    // @TODO: revisit piping api
 
     pub const PipeError = Allocator.Error || DependOnError;
 
-    pub fn pipe(self: *const ExecBuilder, config: PipeConfig) PipeError!void {
+    pub fn pipe(self: *const ExecBuilder, sink: NodeIdx, output: Pl.Source.Data.ExecutionOutput) PipeError!void {
         const ctx = self.ctx;
 
-        const dep = try ctx.dependOn(config.to.idx, self.idx, .implicit);
+        const dep = try ctx.dependOn(sink, self.idx, .implicit);
         errdefer dep.deinit(ctx);
 
-        const to_node = ctx.nodes.get(config.to);
-        const target_data = switch (to_node.data) {
-            .exec => Pl.Edge.TargetData{ .exec = .{
-                .role = .stdin,
-            } },
-            .file => Pl.Edge.TargetData{ .file = .{
-                .mode = .append,
-            } },
-        };
-
-        const edge_idx = try ctx.edges.append(ctx.allocator, Edge{
-            .source = self.idx,
-            .target = config.to,
-            .source_data = .{ .exec = .{
-                .output = config.output,
-            } },
-            .target_data = target_data,
-        });
-        errdefer ctx.edges.pop();
-
-        try to_node.sources.append(ctx.allocator, edge_idx);
-        errdefer _ = to_node.sources.pop();
-
-        const node = self.get();
-        try node.sinks.append(ctx.allocator, edge_idx);
-        errdefer _ = node.sinks.pop();
+        const sink_node = ctx.nodes.get(sink);
+        const edge_result = try ctx.addEdge(
+            SourceKey{
+                .node = self.idx,
+                .data = .{ .exec = output },
+            },
+            SinkKey{
+                .node = sink,
+                .data = switch (sink_node.data) {
+                    .exec => .{ .exec = .{
+                        .role = .stdin,
+                    } },
+                    .file => .{ .file = .{
+                        .mode = .append,
+                    } },
+                },
+            },
+        );
+        errdefer edge_result.deinit(ctx);
     }
 
-    pub const PipeConfig = struct {
-        to: NodeIdx,
-        output: Pl.Edge.SourceData.Execution.Output = .{
-            .stdout = true,
-            .stderr = false,
-        },
-    };
-
-    pub fn pipeFile(self: *const ExecBuilder, output: Pl.Edge.SourceData.Execution.Output, to: FileIdx, config: PipeFileConfig) PipeError!void {
+    pub fn pipeFile(self: *const ExecBuilder, output: Pl.Edge.SourceData.Execution.Output, sink: FileIdx, config: PipeFileConfig) PipeError!void {
         const ctx = self.ctx;
 
-        const dep = try ctx.dependOn(to.idx, self.idx, .implicit);
+        const dep = try ctx.dependOn(sink.idx, self.idx, .implicit);
         errdefer dep.deinit(ctx);
 
-        const to_node = ctx.nodes.get(to);
-        const target_data = switch (to_node.data) {
-            .exec => Pl.Edge.TargetData{ .exec = .{
-                .role = .stdin,
-            } },
-            .file => Pl.Edge.TargetData{ .file = .{
-                .mode = config.mode,
-                .path = config.path,
-            } },
-        };
-
-        const edge_idx = try ctx.edges.append(ctx.allocator, Edge{
-            .source = self.idx,
-            .target = to,
-            .source_data = .{ .exec = .{
-                .output = output,
-            } },
-            .target_data = target_data,
-        });
-        errdefer ctx.edges.pop();
-
-        try to_node.sources.append(ctx.allocator, edge_idx);
-        errdefer _ = to_node.sources.pop();
-
-        const node = self.get();
-        try node.sinks.append(ctx.allocator, edge_idx);
-        errdefer _ = node.sinks.pop();
+        const edge_result = try ctx.addEdge(
+            SourceKey{
+                .node = self.idx,
+                .data = .{ .exec = output },
+            },
+            SinkKey{
+                .node = sink.idx,
+                .data = .{ .file = .{
+                    .mode = config.mode,
+                    .path = config.path,
+                } },
+            },
+        );
+        errdefer edge_result.deinit(ctx);
     }
 
     pub const PipeFileConfig = struct {
@@ -487,31 +698,27 @@ pub const FileIdx = struct {
         return other.ctx.dependOn(self.idx, other, .explicit);
     }
 
-    pub fn pipe(self: FileIdx, to: *const ExecBuilder, config: PipeFileConfig) ExecBuilder.PipeError!void {
-        const ctx = to.ctx;
+    pub fn pipeExec(self: FileIdx, sink: *const ExecBuilder, config: PipeFileConfig) ExecBuilder.PipeError!void {
+        const ctx = sink.ctx;
 
-        const dep = try ctx.dependOn(to.idx, self.idx, .implicit);
+        const dep = try ctx.dependOn(sink.idx, self.idx, .implicit);
         errdefer dep.deinit(ctx);
 
-        const to_node = to.get();
-        const edge_idx = try ctx.edges.append(ctx.allocator, Edge{
-            .source = self.idx,
-            .target = to.idx,
-            .source_data = .{ .file = .{
-                .path = config.path,
-            } },
-            .target_data = .{ .exec = .{
-                .role = .stdin,
-            } },
-        });
-        errdefer ctx.edges.pop();
-
-        try to_node.sources.append(ctx.allocator, edge_idx);
-        errdefer _ = to_node.sources.pop();
-
-        const node = to.get();
-        try node.sinks.append(ctx.allocator, edge_idx);
-        errdefer _ = node.sinks.pop();
+        const edge_result = try ctx.addEdge(
+            SourceKey{
+                .node = self.idx,
+                .data = .{ .file = .{
+                    .path = config.path,
+                } },
+            },
+            SinkKey{
+                .node = sink.idx,
+                .data = .{ .exec = .{
+                    .role = .stdin,
+                } },
+            },
+        );
+        errdefer edge_result.deinit(ctx);
     }
 
     pub const PipeFileConfig = struct {
@@ -554,6 +761,8 @@ const Node = struct {
             collect_stdout: bool = false,
             collect_stderr: bool = false,
 
+            // @TODO: set size limits for collection
+
             pub fn deinit(self: *Execution, allocator: Allocator) void {
                 for (self.args.items) |*arg| {
                     arg.deinit(allocator);
@@ -574,11 +783,79 @@ const Node = struct {
     };
 };
 
-const Edge = struct {
-    source: NodeIdx,
-    target: NodeIdx,
-    source_data: Pl.Edge.SourceData,
-    target_data: Pl.Edge.TargetData,
+pub const Source = struct {
+    node: NodeIdx,
+    data: Pl.Source.Data,
+    sinks_count: usize = 0,
+
+    pub fn deinit(self: *Source, allocator: Allocator) void {
+        self.data.deinit(allocator);
+    }
+};
+
+pub const SourceKey = struct {
+    node: NodeIdx,
+    data: Pl.Source.Data,
+};
+
+// @Performance
+pub const SourceHashContext = struct {
+    pub fn hash(ctx: SourceHashContext, key: SourceKey) u64 {
+        _ = ctx;
+        var hasher = std.hash.Wyhash.init(0);
+
+        std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
+        // std.hash.autoHashStrat(&hasher, key.node.value(), .Shallow);
+        // switch (key.data) {
+        //     .exec => |execution_output| {
+        //         std.hash.autoHashStrat(&hasher, execution_output, .Shallow);
+        //     },
+        //     .file => |file| {
+        //         std.hash.autoHashStrat(&hasher, file.path, .Deep);
+        //     },
+        // }
+
+        return hasher.final();
+    }
+
+    pub fn eql(ctx: SourceHashContext, a: SourceKey, b: SourceKey) bool {
+        _ = ctx;
+        return std.meta.eql(a, b);
+    }
+};
+
+pub const Sink = struct {
+    node: NodeIdx,
+    data: Pl.Sink.Data,
+
+    pub fn deinit(self: *Sink, allocator: Allocator) void {
+        self.data.deinit(allocator);
+    }
+};
+
+pub const SinkKey = struct {
+    node: NodeIdx,
+    data: Pl.Sink.Data,
+};
+
+// @Performance
+pub const SinkHashContext = struct {
+    pub fn hash(ctx: SinkHashContext, key: SinkKey) u64 {
+        _ = ctx;
+        var hasher = std.hash.Wyhash.init(0);
+        std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
+        return hasher.final();
+    }
+
+    pub fn eql(ctx: SinkHashContext, a: SinkKey, b: SinkKey) bool {
+        _ = ctx;
+        return std.meta.eql(a, b);
+    }
+};
+
+pub const Edge = struct {
+    source: SourceIdx,
+    sink: SinkIdx,
 };
 
 const Dependency = struct {

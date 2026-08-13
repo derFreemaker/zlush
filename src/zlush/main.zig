@@ -61,10 +61,15 @@ pub fn main(init: std.process.Init) !u8 {
     const file_test = try ctx.registerFile("~/.viminfo");
 
     const echo_exec = try ctx.exec(&.{"echo"}, null);
-    try file_test.pipe(&echo_exec, .{});
+    try file_test.pipeExec(&echo_exec, .{});
 
-    var plan = try ctx.plan(init.gpa);
-    defer plan.deinit(init.gpa);
+    std.debug.print("{any}\n", .{ctx.nodes.data.items});
+    std.debug.print("{any}\n", .{ctx.sources.data.items});
+    std.debug.print("{any}\n", .{ctx.sinks.data.items});
+    std.debug.print("{any}\n", .{ctx.edges.data.items});
+
+    // var plan = try ctx.plan(init.gpa);
+    // defer plan.deinit(init.gpa);
 
     // var resolvedPlan = libzlush.PlanResolver.resolve(init.gpa, &plan);
     // defer resolvedPlan.deinit();
