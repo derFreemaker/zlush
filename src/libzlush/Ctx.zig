@@ -2,8 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
+const StableList = @import("common/stable_list.zig").StableList;
 const Pl = @import("Plan.zig");
-const StableList = @import("stable_list.zig").StableList;
 
 const NodeList = StableList(Node, Pl.NodeIdx.UnderlyingT);
 const NodeIdx = NodeList.Index;
@@ -74,11 +74,11 @@ pub fn dependsOn(self: *const Ctx, a: NodeIdx, b: NodeIdx) bool {
 
     const node = self.nodes.get(a);
     for (node.depends_on.items) |dep| {
-        if (dep.idx == b) {
+        if (dep.node == b) {
             return true;
         }
 
-        if (self.dependsOn(dep.idx, b)) {
+        if (self.dependsOn(dep.node, b)) {
             return true;
         }
     }
@@ -90,22 +90,27 @@ pub const DependOnError = Allocator.Error || error{
     CircleDependency,
 };
 
-fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, kind: Pl.Dependency.Kind) DependOnError!DependencyResult {
+fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Dependency.WaitMode, kind: Pl.Dependency.Kind) DependOnError!DependencyResult {
     if (self.dependsOn(b, a)) {
         return DependOnError.CircleDependency;
     }
 
     const node = self.nodes.get(a);
     for (node.depends_on.items, 0..) |*dep, i| {
-        if (dep.idx == b) {
+        if (dep.node == b) {
             const result = DependencyResult{
                 .node = a,
                 .idx = i,
-                .previous = dep.kind,
+                .previous_wait_mode = dep.wait_mode,
+                .previous_kind = dep.kind,
             };
 
             if (dep.kind == .implicit) {
                 dep.kind = kind;
+            }
+
+            if (dep.wait_mode == .started) {
+                dep.wait_mode = wait_mode;
             }
 
             return result;
@@ -115,11 +120,13 @@ fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, kind: Pl.Dependency.Kind) Depend
     const result = DependencyResult{
         .node = a,
         .idx = node.depends_on.items.len,
-        .previous = null,
+        .previous_wait_mode = null,
+        .previous_kind = null,
     };
 
     try node.depends_on.append(self.allocator, Dependency{
-        .idx = b,
+        .node = b,
+        .wait_mode = wait_mode,
         .kind = kind,
     });
     errdefer _ = node.depends_on.pop();
@@ -478,7 +485,7 @@ pub fn exec(self: *Ctx, args: []const []const u8, env_map: ?*const std.process.E
 
 pub const ExecBuilder = struct {
     ctx: *Ctx,
-    idx: NodeIdx,
+    node: NodeIdx,
 
     fn init(ctx: *Ctx, args: []const []const u8, env_map: ?*const std.process.Environ.Map) Allocator.Error!ExecBuilder {
         const idx = try ctx.nodes.append(ctx.allocator, Node{
@@ -490,7 +497,7 @@ pub const ExecBuilder = struct {
 
         const builder = ExecBuilder{
             .ctx = ctx,
-            .idx = idx,
+            .node = idx,
         };
         const data = builder.getData();
 
@@ -512,15 +519,15 @@ pub const ExecBuilder = struct {
     }
 
     fn get(self: *const ExecBuilder) *Node {
-        return self.ctx.nodes.get(self.idx);
+        return self.ctx.nodes.get(self.node);
     }
 
     fn getData(self: *const ExecBuilder) *Node.Data.Execution {
         return &self.get().data.exec;
     }
 
-    pub inline fn dependOn(self: *const ExecBuilder, other: NodeIdx) DependOnError!DependencyResult {
-        return self.ctx.dependOn(self.idx, other, .explicit);
+    pub inline fn dependOn(self: *const ExecBuilder, other: NodeIdx, wait_mode: Pl.Dependency.WaitMode) DependOnError!DependencyResult {
+        return self.ctx.dependOn(self.node, other, wait_mode, .explicit);
     }
 
     pub fn addArgs(self: *const ExecBuilder, args: []const []const u8) Allocator.Error!void {
@@ -544,62 +551,62 @@ pub const ExecBuilder = struct {
 
     pub const ExecOutputAsArgError = Allocator.Error || DependOnError;
 
-    pub fn addExecOutputAsArg(self: *const ExecBuilder, from: *const ExecBuilder, config: AddExecOutputAsArgConfig) ExecOutputAsArgError!void {
-        const dep = try self.ctx.dependOn(self.idx, from.idx, .implicit);
-        errdefer dep.deinit(self.ctx);
+    // pub fn addExecOutputAsArg(self: *const ExecBuilder, from: *const ExecBuilder, config: AddExecOutputAsArgConfig) ExecOutputAsArgError!void {
+    //     const dep = try self.ctx.dependOn(self.idx, from.idx, .finished, .implicit);
+    //     errdefer dep.deinit(self.ctx);
 
-        const data = self.getData();
+    //     const data = self.getData();
 
-        // @TODO: redecide if using a Sink as collection point is really optimial,
-        //     it should allow us to take advantage of the entire piping system though
+    //     // @TODO: redecide if using a Sink as collection point is really optimial,
+    //     //     it should allow us to take advantage of the entire piping system though
 
-        const sink_key = SinkKey{
-            .node = self.idx,
-            .data = .{ .exec = .{
-                .role = .{ .arg = .{
-                    .idx = data.args.items.len,
-                    .trim = config.trim,
-                } },
-            } },
-        };
-        const sink_result = try self.ctx.getOrCreateSink(sink_key);
-        errdefer sink_result.deinit(self.ctx);
+    //     const sink_key = SinkKey{
+    //         .node = self.idx,
+    //         .data = .{ .exec = .{
+    //             .role = .{ .arg = .{
+    //                 .idx = data.args.items.len,
+    //                 .trim = config.trim,
+    //             } },
+    //         } },
+    //     };
+    //     const sink_result = try self.ctx.getOrCreateSink(sink_key);
+    //     errdefer sink_result.deinit(self.ctx);
 
-        var stdout_edge_result: ?EdgeResult = null;
-        errdefer if (stdout_edge_result) |result| result.deinit(self.ctx);
-        if (config.stdout) {
-            stdout_edge_result = try self.ctx.addEdge(
-                SourceKey{
-                    .node = from.idx,
-                    .data = .{ .exec = .stdout },
-                },
-                sink_key,
-            );
+    //     var stdout_edge_result: ?EdgeResult = null;
+    //     errdefer if (stdout_edge_result) |result| result.deinit(self.ctx);
+    //     if (config.stdout) {
+    //         stdout_edge_result = try self.ctx.addEdge(
+    //             SourceKey{
+    //                 .node = from.idx,
+    //                 .data = .{ .exec = .stdout },
+    //             },
+    //             sink_key,
+    //         );
 
-            // @TODO: rollback on errdefer
-            from.collectStdout();
-        }
+    //         // @TODO: rollback on errdefer
+    //         from.collectStdout();
+    //     }
 
-        var stderr_edge_result: ?EdgeResult = null;
-        errdefer if (stderr_edge_result) |result| result.deinit(self.ctx);
-        if (config.stderr) {
-            stderr_edge_result = try self.ctx.addEdge(
-                SourceKey{
-                    .node = from.idx,
-                    .data = .{ .exec = .stderr },
-                },
-                sink_key,
-            );
+    //     var stderr_edge_result: ?EdgeResult = null;
+    //     errdefer if (stderr_edge_result) |result| result.deinit(self.ctx);
+    //     if (config.stderr) {
+    //         stderr_edge_result = try self.ctx.addEdge(
+    //             SourceKey{
+    //                 .node = from.idx,
+    //                 .data = .{ .exec = .stderr },
+    //             },
+    //             sink_key,
+    //         );
 
-            // @TODO: rollback on errdefer
-            from.collectStderr();
-        }
+    //         // @TODO: rollback on errdefer
+    //         from.collectStderr();
+    //     }
 
-        try data.args.append(self.ctx.allocator, Pl.Node.Data.Execution.ArgSlot{
-            .captured = sink_result.idx,
-        });
-        errdefer _ = data.args.pop();
-    }
+    //     try data.args.append(self.ctx.allocator, Pl.Node.Data.Execution.ArgSlot{
+    //         .captured = sink_result.idx,
+    //     });
+    //     errdefer _ = data.args.pop();
+    // }
 
     pub const AddExecOutputAsArgConfig = struct {
         stdout: bool = true,
@@ -624,14 +631,6 @@ pub const ExecBuilder = struct {
         return &self.getData().env;
     }
 
-    pub fn collectStdout(self: *const ExecBuilder) void {
-        self.getData().collect_stdout = true;
-    }
-
-    pub fn collectStderr(self: *const ExecBuilder) void {
-        self.getData().collect_stderr = true;
-    }
-
     // @TODO: revisit piping api
 
     pub const PipeError = Allocator.Error || DependOnError;
@@ -639,13 +638,13 @@ pub const ExecBuilder = struct {
     pub fn pipe(self: *const ExecBuilder, sink: NodeIdx, output: Pl.Source.Data.ExecutionOutput) PipeError!void {
         const ctx = self.ctx;
 
-        const dep = try ctx.dependOn(sink, self.idx, .implicit);
+        const dep = try ctx.dependOn(sink, self.node, .started, .implicit);
         errdefer dep.deinit(ctx);
 
         const sink_node = ctx.nodes.get(sink);
         const edge_result = try ctx.addEdge(
             SourceKey{
-                .node = self.idx,
+                .node = self.node,
                 .data = .{ .exec = output },
             },
             SinkKey{
@@ -666,12 +665,12 @@ pub const ExecBuilder = struct {
     pub fn pipeFile(self: *const ExecBuilder, output: Pl.Edge.SourceData.Execution.Output, sink: FileIdx, config: PipeFileConfig) PipeError!void {
         const ctx = self.ctx;
 
-        const dep = try ctx.dependOn(sink.idx, self.idx, .implicit);
+        const dep = try ctx.dependOn(sink.idx, self.node, .started, .implicit);
         errdefer dep.deinit(ctx);
 
         const edge_result = try ctx.addEdge(
             SourceKey{
-                .node = self.idx,
+                .node = self.node,
                 .data = .{ .exec = output },
             },
             SinkKey{
@@ -694,14 +693,19 @@ pub const ExecBuilder = struct {
 pub const FileIdx = struct {
     idx: NodeIdx,
 
-    pub inline fn dependOn(self: FileIdx, other: *const ExecBuilder) DependOnError!void {
-        return other.ctx.dependOn(self.idx, other, .explicit);
+    pub inline fn dependOn(self: FileIdx, other: *const ExecBuilder, wait_mode: Pl.Dependency.WaitMode) DependOnError!void {
+        return other.ctx.dependOn(self.idx, other, wait_mode, .explicit);
     }
 
     pub fn pipeExec(self: FileIdx, sink: *const ExecBuilder, config: PipeFileConfig) ExecBuilder.PipeError!void {
         const ctx = sink.ctx;
 
-        const dep = try ctx.dependOn(sink.idx, self.idx, .implicit);
+        const dep = try ctx.dependOn(
+            sink.node,
+            self.idx,
+            .started,
+            .implicit,
+        );
         errdefer dep.deinit(ctx);
 
         const edge_result = try ctx.addEdge(
@@ -712,7 +716,7 @@ pub const FileIdx = struct {
                 } },
             },
             SinkKey{
-                .node = sink.idx,
+                .node = sink.node,
                 .data = .{ .exec = .{
                     .role = .stdin,
                 } },
@@ -758,11 +762,6 @@ const Node = struct {
             args: std.ArrayList(Pl.Node.Data.Execution.ArgSlot) = .empty,
             env: std.process.Environ.Map,
 
-            collect_stdout: bool = false,
-            collect_stderr: bool = false,
-
-            // @TODO: set size limits for collection
-
             pub fn deinit(self: *Execution, allocator: Allocator) void {
                 for (self.args.items) |*arg| {
                     arg.deinit(allocator);
@@ -803,18 +802,7 @@ pub const SourceHashContext = struct {
     pub fn hash(ctx: SourceHashContext, key: SourceKey) u64 {
         _ = ctx;
         var hasher = std.hash.Wyhash.init(0);
-
         std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
-        // std.hash.autoHashStrat(&hasher, key.node.value(), .Shallow);
-        // switch (key.data) {
-        //     .exec => |execution_output| {
-        //         std.hash.autoHashStrat(&hasher, execution_output, .Shallow);
-        //     },
-        //     .file => |file| {
-        //         std.hash.autoHashStrat(&hasher, file.path, .Deep);
-        //     },
-        // }
-
         return hasher.final();
     }
 
@@ -859,17 +847,20 @@ pub const Edge = struct {
 };
 
 const Dependency = struct {
-    idx: NodeIdx,
+    node: NodeIdx,
+    wait_mode: Pl.Dependency.WaitMode,
     kind: Pl.Dependency.Kind,
 };
 
 const DependencyResult = struct {
     node: NodeIdx,
     idx: usize,
-    previous: ?Pl.Dependency.Kind,
+    previous_wait_mode: ?Pl.Dependency.WaitMode,
+    previous_kind: ?Pl.Dependency.Kind,
 
     pub fn gotAdded(self: DependencyResult) bool {
-        return self.previous == null;
+        return self.previous_wait_mode == null and
+            self.previous_kind == null;
     }
 
     pub fn deinit(self: DependencyResult, ctx: *Ctx) void {
@@ -878,7 +869,8 @@ const DependencyResult = struct {
         if (self.gotAdded()) {
             _ = node.depends_on.orderedRemove(self.idx);
         } else {
-            node.depends_on.items[self.idx].kind = self.previous.?;
+            node.depends_on.items[self.idx].wait_mode = self.previous_wait_mode.?;
+            node.depends_on.items[self.idx].kind = self.previous_kind.?;
         }
     }
 };
@@ -890,7 +882,7 @@ test "cricle dependency" {
     const a = try ctx.exec(&.{"echo"}, null);
 
     const b = try ctx.exec(&.{"cat"}, null);
-    try b.addExecOutputAsArg(&a, .{});
+    try a.pipe(b.node, .stdout);
 
-    try testing.expectError(DependOnError.CircleDependency, a.dependOn(b.idx));
+    try testing.expectError(DependOnError.CircleDependency, a.dependOn(b.node, .finished));
 }

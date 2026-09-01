@@ -1,12 +1,15 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
 pub fn IndexT(comptime ParentT: type, comptime T: type) type {
     // we only need the parent type for uniques
     _ = ParentT;
 
-    if (@typeInfo(T) != .int) {
-        @compileError("expected T is of type 'int'");
+    if (@typeInfo(T) != .int or
+        @typeInfo(T).int.signedness != .unsigned)
+    {
+        @compileError("expected T is of type 'int' and unsigened");
     }
 
     return enum(T) {

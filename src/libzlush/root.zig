@@ -8,6 +8,9 @@ test {
 
     _ = @import("Ctx.zig");
 
+    _ = @import("common/IndexedPriorityDequeue.zig");
+    _ = @import("common/MultiReaderCircBuffer.zig");
+
     @setEvalBranchQuota(1_000_000);
     refAllDeclsRecursive(@This());
 }

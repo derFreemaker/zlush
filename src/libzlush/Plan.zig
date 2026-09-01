@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const IndexT = @import("index.zig").IndexT;
+const IndexT = @import("common/index.zig").IndexT;
 
 pub const NodeIdx = IndexT(Node, u16);
 
@@ -69,9 +69,6 @@ pub const Node = struct {
         pub const Execution = struct {
             args: []ArgSlot,
             env: std.process.Environ.Map,
-
-            collect_stdout: bool,
-            collect_stderr: bool,
 
             pub fn deinit(self: *Execution, allocator: std.mem.Allocator) void {
                 for (self.args) |*arg| {
@@ -202,8 +199,14 @@ pub const Edge = struct {
 };
 
 pub const Dependency = struct {
-    idx: NodeIdx,
+    node: NodeIdx,
+    wait_mode: WaitMode,
     kind: Kind,
+
+    pub const WaitMode = enum {
+        started,
+        finished,
+    };
 
     pub const Kind = enum {
         implicit,
