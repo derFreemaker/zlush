@@ -8,6 +8,7 @@ pub const SourceIdx = IndexT(Source, u16);
 pub const SinkIdx = IndexT(Sink, u16);
 
 pub const EdgeIdx = IndexT(Edge, u16);
+pub const DepIdx = IndexT(Dependency, u16);
 
 // Plan
 const Pl = @This();
@@ -18,6 +19,7 @@ sources: []Source,
 sinks: []Sink,
 
 edges: []Edge,
+dependencies: []Dependency,
 
 pub fn deinit(self: *Pl, allocator: std.mem.Allocator) void {
     for (self.nodes) |*node| {
@@ -44,7 +46,8 @@ pub const Node = struct {
     sources: []EdgeIdx,
     sinks: []EdgeIdx,
 
-    depends_on: []Dependency,
+    dep_on: []DepIdx,
+    dep_of: []DepIdx,
 
     pub fn deinit(self: *Node, allocator: std.mem.Allocator) void {
         self.data.deinit(allocator);
@@ -52,7 +55,8 @@ pub const Node = struct {
         allocator.free(self.sources);
         allocator.free(self.sinks);
 
-        allocator.free(self.depends_on);
+        allocator.free(self.dep_on);
+        allocator.free(self.dep_of);
     }
 
     pub const Data = union(enum) {
@@ -107,6 +111,7 @@ pub const Node = struct {
 pub const Source = struct {
     node: NodeIdx,
     data: Data,
+
     sinks_count: usize,
 
     pub fn deinit(self: *Source, allocator: std.mem.Allocator) void {
@@ -142,6 +147,8 @@ pub const Source = struct {
 pub const Sink = struct {
     node: NodeIdx,
     data: Data,
+
+    sources_count: usize,
 
     pub fn deinit(self: *Sink, allocator: std.mem.Allocator) void {
         self.data.deinit(allocator);
@@ -200,6 +207,8 @@ pub const Edge = struct {
 
 pub const Dependency = struct {
     node: NodeIdx,
+    dep: NodeIdx,
+
     wait_mode: WaitMode,
     kind: Kind,
 

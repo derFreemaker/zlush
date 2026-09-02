@@ -31,9 +31,7 @@ pub fn deinit(self: *Zlush) void {
 }
 
 pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Error!Ctx {
-    _ = self; // autofix
-
-    var ctx = Ctx.init(allocator);
+    var ctx = try Ctx.init(allocator, &self.config);
     errdefer ctx.deinit();
 
     return ctx;

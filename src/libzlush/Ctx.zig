@@ -2,8 +2,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const StableList = @import("common/stable_list.zig").StableList;
+const StableList = @import("common/StableList.zig").StableList;
 const Pl = @import("Plan.zig");
+const Zlush = @import("Zlush.zig");
 
 const NodeList = StableList(Node, Pl.NodeIdx.UnderlyingT);
 const NodeIdx = NodeList.Index;
@@ -13,14 +14,21 @@ const SinkList = StableList(Sink, Pl.SinkIdx.UnderlyingT);
 const SinkIdx = SinkList.Index;
 const EdgeList = StableList(Edge, Pl.EdgeIdx.UnderlyingT);
 const EdgeIdx = EdgeList.Index;
+const DepList = StableList(Dependency, Pl.DepIdx.UnderlyingT);
+const DepIdx = DepList.Index;
+const NodeDepList = StableList(DepIdx, Pl.DepIdx.UnderlyingT);
+const NodeDepIdx = NodeDepList.Index;
 
 const Ctx = @This();
 
-// @TODO: rework hash map situation
+gpa: Allocator,
 
-allocator: Allocator,
+// CLEANUP(freemaker): make own config section for execution
+config: *const Zlush.Config,
 
 nodes: NodeList,
+
+// @TODO: rework hash map situation
 
 sources: SourceList,
 source_map: std.HashMapUnmanaged(SourceKey, SourceIdx, SourceHashContext, 80),
@@ -29,42 +37,50 @@ sinks: SinkList,
 sink_map: std.HashMapUnmanaged(SinkKey, SinkIdx, SinkHashContext, 80),
 
 edges: EdgeList,
+dependencies: DepList,
 
-pub fn init(allocator: Allocator) Ctx {
-    return Ctx{
-        .allocator = allocator,
+pub fn init(self: *Ctx, gpa: Allocator, config: *const Zlush.Config) Allocator.Error!void {
+    self.gpa = gpa;
+    self.config = config;
 
-        .nodes = .empty,
+    try NodeList.initCapacity(&self.nodes, gpa, 32);
+    errdefer self.nodes.deinit(gpa);
 
-        .sources = .empty,
-        .source_map = .empty,
+    try SourceList.initCapacity(&self.sources, gpa, 32);
+    errdefer self.sources.deinit(gpa);
+    self.source_map = .empty;
 
-        .sinks = .empty,
-        .sink_map = .empty,
+    try SinkList.initCapacity(&self.sinks, gpa, 32);
+    errdefer self.sinks.deinit(gpa);
+    self.sink_map = .empty;
 
-        .edges = .empty,
-    };
+    try EdgeList.initCapacity(&self.edges, gpa, 32);
+    errdefer self.edges.deinit(gpa);
+
+    try DepList.initCapacity(&self.dependencies, gpa, 32);
+    errdefer self.dependencies.deinit(gpa);
 }
 
 pub fn deinit(self: *Ctx) void {
     for (self.nodes.data.items) |*node| {
-        node.deinit(self.allocator);
+        node.deinit(self.gpa);
     }
-    self.nodes.deinit(self.allocator);
+    self.nodes.deinit(self.gpa);
 
-    self.source_map.deinit(self.allocator);
+    self.source_map.deinit(self.gpa);
     for (self.sources.data.items) |*source| {
-        source.deinit(self.allocator);
+        source.deinit(self.gpa);
     }
-    self.sources.deinit(self.allocator);
+    self.sources.deinit(self.gpa);
 
-    self.sink_map.deinit(self.allocator);
+    self.sink_map.deinit(self.gpa);
     for (self.sinks.data.items) |*sink| {
-        sink.deinit(self.allocator);
+        sink.deinit(self.gpa);
     }
-    self.sinks.deinit(self.allocator);
+    self.sinks.deinit(self.gpa);
 
-    self.edges.deinit(self.allocator);
+    self.edges.deinit(self.gpa);
+    self.dependencies.deinit(self.gpa);
 }
 
 pub fn dependsOn(self: *const Ctx, a: NodeIdx, b: NodeIdx) bool {
@@ -73,12 +89,13 @@ pub fn dependsOn(self: *const Ctx, a: NodeIdx, b: NodeIdx) bool {
     }
 
     const node = self.nodes.get(a);
-    for (node.depends_on.items) |dep| {
-        if (dep.node == b) {
+    for (node.dep_on.data.items) |dep_idx| {
+        const dep = self.dependencies.get(dep_idx);
+        if (dep.target == b) {
             return true;
         }
 
-        if (self.dependsOn(dep.node, b)) {
+        if (self.dependsOn(dep.target, b)) {
             return true;
         }
     }
@@ -96,11 +113,13 @@ fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Dependency.WaitMod
     }
 
     const node = self.nodes.get(a);
-    for (node.depends_on.items, 0..) |*dep, i| {
-        if (dep.node == b) {
+    for (node.dep_on.data.items) |dep_idx| {
+        const dep = self.dependencies.get(dep_idx);
+        if (dep.target == b) {
             const result = DependencyResult{
-                .node = a,
-                .idx = i,
+                .idx = dep_idx,
+                .node_idx = dep.node,
+
                 .previous_wait_mode = dep.wait_mode,
                 .previous_kind = dep.kind,
             };
@@ -117,25 +136,34 @@ fn dependOn(self: *Ctx, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Dependency.WaitMod
         }
     }
 
-    const result = DependencyResult{
+    const dep_idx = try self.dependencies.append(self.gpa, Dependency{
         .node = a,
-        .idx = node.depends_on.items.len,
-        .previous_wait_mode = null,
-        .previous_kind = null,
-    };
+        .target = b,
 
-    try node.depends_on.append(self.allocator, Dependency{
-        .node = b,
         .wait_mode = wait_mode,
         .kind = kind,
     });
-    errdefer _ = node.depends_on.pop();
+    errdefer self.dependencies.remove(dep_idx);
 
-    return result;
+    const node_dep_idx = try node.dep_on.append(self.gpa, dep_idx);
+    errdefer _ = node.dep_on.pop();
+
+    const target_node = self.nodes.get(b);
+    const target_dep_idx = try target_node.dep_of.append(self.gpa, dep_idx);
+    errdefer _ = target_node.dep_of.pop();
+
+    return DependencyResult{
+        .idx = dep_idx,
+        .node_idx = node_dep_idx,
+        .target_idx = target_dep_idx,
+
+        .previous_wait_mode = null,
+        .previous_kind = null,
+    };
 }
 
 fn getOrCreateSource(self: *Ctx, key: SourceKey) Allocator.Error!SourceResult {
-    const result = try self.source_map.getOrPut(self.allocator, key);
+    const result = try self.source_map.getOrPut(self.gpa, key);
     errdefer if (!result.found_existing) {
         _ = self.source_map.remove(key);
     };
@@ -147,13 +175,13 @@ fn getOrCreateSource(self: *Ctx, key: SourceKey) Allocator.Error!SourceResult {
         };
     }
 
-    const idx = try self.sources.append(self.allocator, Source{
+    const idx = try self.sources.append(self.gpa, Source{
         .node = key.node,
         .data = switch (key.data) {
             .exec => |execution| .{ .exec = execution },
             .file => |file| blk: {
-                const path = if (file.path) |path| try self.allocator.dupe(u8, path) else null;
-                errdefer if (path) |p| self.allocator.free(p);
+                const path = if (file.path) |path| try self.gpa.dupe(u8, path) else null;
+                errdefer if (path) |p| self.gpa.free(p);
 
                 break :blk .{ .file = .{
                     .path = path,
@@ -163,8 +191,8 @@ fn getOrCreateSource(self: *Ctx, key: SourceKey) Allocator.Error!SourceResult {
     });
     errdefer {
         const source = self.sources.get(idx);
-        source.deinit(self.allocator);
-        self.sources.pop();
+        source.deinit(self.gpa);
+        self.sources.remove(idx);
     }
 
     result.value_ptr.* = idx;
@@ -188,13 +216,13 @@ pub const SourceResult = struct {
         _ = ctx.source_map.remove(self.key);
 
         const source = ctx.sources.get(self.idx);
-        defer ctx.sources.pop();
-        source.deinit(ctx.allocator);
+        source.deinit(ctx.gpa);
+        ctx.sources.remove(self.idx);
     }
 };
 
 fn getOrCreateSink(self: *Ctx, key: SinkKey) Allocator.Error!SinkResult {
-    const result = try self.sink_map.getOrPut(self.allocator, key);
+    const result = try self.sink_map.getOrPut(self.gpa, key);
     errdefer if (!result.found_existing) {
         _ = self.sink_map.remove(key);
     };
@@ -206,13 +234,13 @@ fn getOrCreateSink(self: *Ctx, key: SinkKey) Allocator.Error!SinkResult {
         };
     }
 
-    const idx = try self.sinks.append(self.allocator, Sink{
+    const idx = try self.sinks.append(self.gpa, Sink{
         .node = key.node,
         .data = switch (key.data) {
             .exec => |execution| .{ .exec = execution },
             .file => |file| blk: {
-                const path = if (file.path) |path| try self.allocator.dupe(u8, path) else null;
-                errdefer if (path) |p| self.allocator.free(p);
+                const path = if (file.path) |path| try self.gpa.dupe(u8, path) else null;
+                errdefer if (path) |p| self.gpa.free(p);
 
                 break :blk .{ .file = .{
                     .path = path,
@@ -222,7 +250,7 @@ fn getOrCreateSink(self: *Ctx, key: SinkKey) Allocator.Error!SinkResult {
     });
     errdefer {
         const sink = self.sinks.get(idx);
-        sink.deinit(self.allocator);
+        sink.deinit(self.gpa);
         self.sinks.pop();
     }
 
@@ -248,7 +276,7 @@ pub const SinkResult = struct {
 
         const sink = ctx.sinks.get(self.idx);
         defer ctx.sinks.pop();
-        sink.deinit(ctx.allocator);
+        sink.deinit(ctx.gpa);
     }
 };
 
@@ -259,18 +287,18 @@ fn addEdge(self: *Ctx, source_key: SourceKey, sink_key: SinkKey) Allocator.Error
     const sink_result = try self.getOrCreateSink(sink_key);
     errdefer sink_result.deinit(self);
 
-    const idx = try self.edges.append(self.allocator, Edge{
+    const idx = try self.edges.append(self.gpa, Edge{
         .source = source_result.idx,
         .sink = sink_result.idx,
     });
     errdefer self.edges.pop();
 
     const source_node = self.nodes.get(source_key.node);
-    try source_node.sinks.append(self.allocator, idx);
+    try source_node.sinks.append(self.gpa, idx);
     errdefer _ = source_node.sinks.pop();
 
     const sink_node = self.nodes.get(sink_key.node);
-    try sink_node.sources.append(self.allocator, idx);
+    try sink_node.sources.append(self.gpa, idx);
     errdefer _ = sink_node.sources.pop();
 
     const source = self.sources.get(source_result.idx);
@@ -305,10 +333,10 @@ pub const EdgeResult = struct {
 };
 
 pub fn registerFile(self: *Ctx, path: []const u8) Allocator.Error!FileIdx {
-    const copy = try self.allocator.dupe(u8, path);
-    errdefer self.allocator.free(copy);
+    const copy = try self.gpa.dupe(u8, path);
+    errdefer self.gpa.free(copy);
 
-    const node_idx = try self.nodes.append(self.allocator, Node{
+    const node_idx = try self.nodes.append(self.gpa, Node{
         .data = .{ .file = .{
             .path = copy,
         } },
@@ -488,9 +516,9 @@ pub const ExecBuilder = struct {
     node: NodeIdx,
 
     fn init(ctx: *Ctx, args: []const []const u8, env_map: ?*const std.process.Environ.Map) Allocator.Error!ExecBuilder {
-        const idx = try ctx.nodes.append(ctx.allocator, Node{
+        const idx = try ctx.nodes.append(ctx.gpa, Node{
             .data = .{ .exec = .{
-                .env = .init(ctx.allocator),
+                .env = .init(ctx.gpa),
             } },
         });
         errdefer ctx.nodes.pop();
@@ -501,18 +529,18 @@ pub const ExecBuilder = struct {
         };
         const data = builder.getData();
 
-        data.env = if (env_map) |env| try env.clone(ctx.allocator) else std.process.Environ.Map.init(ctx.allocator);
+        data.env = if (env_map) |env| try env.clone(ctx.gpa) else std.process.Environ.Map.init(ctx.gpa);
         errdefer data.env.deinit();
 
-        data.args = try .initCapacity(ctx.allocator, args.len);
+        data.args = try .initCapacity(ctx.gpa, args.len);
         errdefer {
             for (data.args.items) |*arg| {
-                arg.deinit(ctx.allocator);
+                arg.deinit(ctx.gpa);
             }
-            data.args.deinit(ctx.allocator);
+            data.args.deinit(ctx.gpa);
         }
         for (args) |arg| {
-            data.args.appendAssumeCapacity(.{ .literal = try ctx.allocator.dupe(u8, arg) });
+            data.args.appendAssumeCapacity(.{ .literal = try ctx.gpa.dupe(u8, arg) });
         }
 
         return builder;
@@ -535,16 +563,16 @@ pub const ExecBuilder = struct {
 
         const data = self.getData();
 
-        const args_slice = try data.args.addManyAsSlice(self.ctx.allocator, args.len);
+        const args_slice = try data.args.addManyAsSlice(self.ctx.gpa, args.len);
         errdefer self.args.items.len -= args_slice.len;
 
         var arg_i: usize = 0;
         errdefer for (0..arg_i) |i| {
             const arg = &args_slice[i];
-            arg.deinit(self.ctx.allocator);
+            arg.deinit(self.ctx.gpa);
         };
         for (args) |arg| {
-            args_slice[arg_i] = ArgSlot{ .literal = try self.ctx.allocator.dupe(u8, arg) };
+            args_slice[arg_i] = ArgSlot{ .literal = try self.ctx.gpa.dupe(u8, arg) };
             arg_i += 1;
         }
     }
@@ -616,7 +644,7 @@ pub const ExecBuilder = struct {
     };
 
     pub fn setEnvMap(self: *const ExecBuilder, env_map: std.process.Environ.Map) Allocator.Error!void {
-        const clone = try env_map.clone(self.ctx.allocator);
+        const clone = try env_map.clone(self.ctx.gpa);
         return self.setEnvMapMove(clone);
     }
 
@@ -736,25 +764,27 @@ const Node = struct {
     sources: std.ArrayList(EdgeIdx) = .empty,
     sinks: std.ArrayList(EdgeIdx) = .empty,
 
-    depends_on: std.ArrayList(Dependency) = .empty,
+    dep_on: StableList(DepIdx, u8) = .empty,
+    dep_of: StableList(DepIdx, u8) = .empty,
 
-    pub fn deinit(self: *Node, allocator: Allocator) void {
-        self.data.deinit(allocator);
+    pub fn deinit(self: *Node, gpa: Allocator) void {
+        self.data.deinit(gpa);
 
-        self.sources.deinit(allocator);
-        self.sinks.deinit(allocator);
+        self.sources.deinit(gpa);
+        self.sinks.deinit(gpa);
 
-        self.depends_on.deinit(allocator);
+        self.dep_on.deinit(gpa);
+        self.dep_of.deinit(gpa);
     }
 
     const Data = union(enum) {
         exec: Execution,
         file: File,
 
-        pub fn deinit(self: *Data, allocator: Allocator) void {
+        pub fn deinit(self: *Data, gpa: Allocator) void {
             switch (self.*) {
-                .exec => self.exec.deinit(allocator),
-                .file => self.file.deinit(allocator),
+                .exec => self.exec.deinit(gpa),
+                .file => self.file.deinit(gpa),
             }
         }
 
@@ -762,11 +792,11 @@ const Node = struct {
             args: std.ArrayList(Pl.Node.Data.Execution.ArgSlot) = .empty,
             env: std.process.Environ.Map,
 
-            pub fn deinit(self: *Execution, allocator: Allocator) void {
+            pub fn deinit(self: *Execution, gpa: Allocator) void {
                 for (self.args.items) |*arg| {
-                    arg.deinit(allocator);
+                    arg.deinit(gpa);
                 }
-                self.args.deinit(allocator);
+                self.args.deinit(gpa);
 
                 self.env.deinit();
             }
@@ -775,8 +805,8 @@ const Node = struct {
         const File = struct {
             path: []const u8,
 
-            pub fn deinit(self: *File, allocator: Allocator) void {
-                allocator.free(self.path);
+            pub fn deinit(self: *File, gpa: Allocator) void {
+                gpa.free(self.path);
             }
         };
     };
@@ -784,16 +814,18 @@ const Node = struct {
 
 pub const Source = struct {
     node: NodeIdx,
+
     data: Pl.Source.Data,
     sinks_count: usize = 0,
 
-    pub fn deinit(self: *Source, allocator: Allocator) void {
-        self.data.deinit(allocator);
+    pub fn deinit(self: *Source, gpa: Allocator) void {
+        self.data.deinit(gpa);
     }
 };
 
 pub const SourceKey = struct {
     node: NodeIdx,
+
     data: Pl.Source.Data,
 };
 
@@ -814,15 +846,17 @@ pub const SourceHashContext = struct {
 
 pub const Sink = struct {
     node: NodeIdx,
+
     data: Pl.Sink.Data,
 
-    pub fn deinit(self: *Sink, allocator: Allocator) void {
-        self.data.deinit(allocator);
+    pub fn deinit(self: *Sink, gpa: Allocator) void {
+        self.data.deinit(gpa);
     }
 };
 
 pub const SinkKey = struct {
     node: NodeIdx,
+
     data: Pl.Sink.Data,
 };
 
@@ -848,13 +882,17 @@ pub const Edge = struct {
 
 const Dependency = struct {
     node: NodeIdx,
+    target: NodeIdx,
+
     wait_mode: Pl.Dependency.WaitMode,
     kind: Pl.Dependency.Kind,
 };
 
 const DependencyResult = struct {
-    node: NodeIdx,
-    idx: usize,
+    idx: DepIdx,
+    node_idx: NodeDepIdx,
+    target_idx: NodeDepIdx,
+
     previous_wait_mode: ?Pl.Dependency.WaitMode,
     previous_kind: ?Pl.Dependency.Kind,
 
@@ -864,19 +902,25 @@ const DependencyResult = struct {
     }
 
     pub fn deinit(self: DependencyResult, ctx: *Ctx) void {
-        const node = ctx.nodes.get(self.node);
+        const dep = ctx.dependencies.get(self.idx);
 
         if (self.gotAdded()) {
-            _ = node.depends_on.orderedRemove(self.idx);
+            _ = ctx.dependencies.remove(self.idx);
+            ctx.nodes.get(dep.node).dep_on.remove(self.node_idx);
+            ctx.nodes.get(dep.target).dep_of.remove(self.target_idx);
         } else {
-            node.depends_on.items[self.idx].wait_mode = self.previous_wait_mode.?;
-            node.depends_on.items[self.idx].kind = self.previous_kind.?;
+            dep.wait_mode = self.previous_wait_mode.?;
+            dep.kind = self.previous_kind.?;
         }
     }
 };
 
 test "cricle dependency" {
-    var ctx = Ctx.init(testing.allocator);
+    var ctx: Ctx = undefined;
+    try Ctx.init(&ctx, testing.allocator, &Zlush.Config{
+        .load_profile = false,
+        .allow_creating_missing_directories_for_file_creation = false,
+    });
     defer ctx.deinit();
 
     const a = try ctx.exec(&.{"echo"}, null);

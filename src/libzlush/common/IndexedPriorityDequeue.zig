@@ -77,7 +77,7 @@ pub fn IndexedPriorityDequeue(
                 return null;
             }
 
-            return self.nodes[self.inverse_queue_map[0]];
+            return self.nodes[self.inverse_queue_map[0].value()];
         }
 
         pub fn peekIdx(self: *const Self) ?Index {
