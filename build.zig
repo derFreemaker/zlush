@@ -66,6 +66,7 @@ pub fn build(b: *std.Build) !void {
         .name = "libzlush",
         .root_module = lib_mod,
     });
+
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const zlush_exe_tests = b.addTest(.{

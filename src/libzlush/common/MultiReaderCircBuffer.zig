@@ -74,7 +74,7 @@ pub fn MultiReaderCircBuffer(comptime T: type) type {
 
         inline fn avaiableSpace(self: *Self) usize {
             const diff = self.end -% self.start;
-            const mask = @as(usize, @intFromBool(diff > self.buf.len)) *% self.buf.len;
+            const mask = self.buf.len & (0 -% @intFromBool(diff > self.buf.len));
             return diff +% mask;
         }
 
@@ -98,12 +98,16 @@ pub fn MultiReaderCircBuffer(comptime T: type) type {
             self.end += tail_write_len;
 
             const head_pos = if (self.end < self.start) self.end else 0;
-            const head_space = if (self.end < self.start)
+            const head_space = blk: {
                 // we keep one slot free to make `start == end`
                 // an unambiguous state for an empty buffer
-                self.start - self.end - 1
-            else
-                self.start;
+
+                if (self.end < self.start) {
+                    break :blk self.start - self.end - 1;
+                }
+
+                break :blk self.start - @intFromBool(self.start != 0);
+            };
             const head_write_len = @min(slice.len - tail_write_len, head_space);
             @memcpy(self.buf[head_pos .. head_pos + head_write_len], slice[tail_write_len .. tail_write_len + head_write_len]);
             if (self.end < self.start) {
@@ -130,32 +134,33 @@ pub fn MultiReaderCircBuffer(comptime T: type) type {
             }
         }
 
-        /// we first read the back section and if that is empty we read the front section
-        /// requiring two calls in order to read both
+        /// - first reads to the end of the buffer
+        ///
+        /// - if the reader is at the end, we read from the front of the buffer
+        ///
+        /// requiring two calls in order to read both,
+        /// if the buffer is currently wrapping and the reader is before the wrap
         pub fn read(self: *Self, reader: ReaderIdx, max_n: usize) []const T {
-            var reader_pos = self.readers.get(reader);
-            defer self.readers.update(reader, reader_pos);
+            const reader_pos = self.readers.get(reader);
 
-            var data: []const u8 = &.{};
-            if (reader_pos < self.end) {
-                const read_len = @min(self.end - reader_pos, max_n);
-                data = self.buf[reader_pos .. reader_pos + read_len];
-                reader_pos = reader_pos + read_len;
-            } else if (reader_pos < self.buf.len) {
-                const read_len = @min(self.buf.len - reader_pos, max_n);
-                data = self.buf[reader_pos .. reader_pos + read_len];
-                reader_pos = reader_pos + read_len;
-            } else if (reader_pos == self.buf.len) {
-                const read_len = @min(self.end, max_n);
-                data = self.buf[0..read_len];
-                reader_pos = read_len;
-            } else {
-                unreachable;
-            }
+            @setRuntimeSafety(false);
+
+            const wrap_mask = @as(usize, 0) -% @intFromBool(reader_pos == self.buf.len);
+            const pos = reader_pos - (self.buf.len & wrap_mask);
+
+            const buf_end_mask = @as(usize, 0) -% @intFromBool(pos >= self.end);
+            const upper_bound = self.end + ((self.buf.len - self.end) & buf_end_mask);
+
+            const read_len = @min(upper_bound - pos, max_n);
+            const data = self.buf[pos .. pos + read_len];
+            const new_reader_pos = pos + read_len;
+
+            @setRuntimeSafety(true);
 
             if (self.readers.peekIdx().? == reader) {
-                self.start = reader_pos;
+                self.start = new_reader_pos;
             }
+            self.readers.update(reader, new_reader_pos);
 
             return data;
         }
@@ -231,10 +236,10 @@ test "two readers" {
 
     try testing.expectEqual(0, buf.start);
 
-    const slice2 = buf.read(reader2, 8);
-    try testing.expectEqualStrings(str[0..8], slice2);
+    const slice2 = buf.read(reader2, 32);
+    try testing.expectEqualStrings(str[0..11], slice2);
 
-    try testing.expectEqual(8, buf.start);
+    try testing.expectEqual(11, buf.start);
 }
 
 test "unregister last reader" {
@@ -250,4 +255,32 @@ test "unregister last reader" {
     buf.unregisterReader(reader);
     try testing.expectEqual(0, buf.start);
     try testing.expectEqual(0, buf.end);
+}
+
+test "wrap" {
+    var buf: TestBuffer = undefined;
+    try TestBuffer.init(&buf, testing.allocator, 32, 1, 32);
+    defer buf.deinit(testing.allocator);
+
+    const reader = try buf.registerReader(testing.allocator);
+
+    const str = "test string lol";
+    _ = buf.write(testing.allocator, str);
+
+    const slice = buf.read(reader, 12);
+    try testing.expectEqualStrings(str[0..12], slice);
+
+    const written1 = buf.write(testing.allocator, str);
+    try testing.expectEqual(15, written1);
+    const written2 = buf.write(testing.allocator, str);
+    try testing.expectEqual(13, written2);
+
+    try testing.expectEqual(12, buf.start);
+    try testing.expectEqual(11, buf.end);
+
+    const slice1 = buf.read(reader, 32);
+    try testing.expectEqual(20, slice1.len);
+
+    const slice2 = buf.read(reader, 32);
+    try testing.expectEqual(11, slice2.len);
 }

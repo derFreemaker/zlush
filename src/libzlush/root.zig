@@ -4,24 +4,30 @@ pub const PlanResolver = @import("PlanResolver.zig");
 pub const Zlush = @import("Zlush.zig");
 
 test {
+    _ = @import("common/IndexedPriorityDequeue.zig");
+    _ = @import("common/MultiReaderCircBuffer.zig");
+
     _ = @import("Tokenizer.zig");
 
     _ = @import("Ctx.zig");
-
-    _ = @import("common/IndexedPriorityDequeue.zig");
-    _ = @import("common/MultiReaderCircBuffer.zig");
 
     @setEvalBranchQuota(1_000_000);
     refAllDeclsRecursive(@This());
 }
 
-/// Given a type, recursively references all the declarations inside, so that the semantic analyzer sees them.
+/// Given a type, recursively references all the declarations inside,
+/// so that the semantic analyzer sees them.
 /// For deep types, you may use `@setEvalBranchQuota`.
 pub fn refAllDeclsRecursive(comptime T: type) void {
     inline for (comptime std.meta.declarations(T)) |decl| {
         if (@TypeOf(@field(T, decl.name)) == type) {
             switch (@typeInfo(@field(T, decl.name))) {
-                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, decl.name)),
+                .@"struct",
+                .@"enum",
+                .@"union",
+                .@"opaque",
+                => refAllDeclsRecursive(@field(T, decl.name)),
+
                 else => {},
             }
         }
