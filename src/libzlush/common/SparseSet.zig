@@ -63,12 +63,16 @@ pub fn SparseSet(comptime T: type, comptime IndexT: type, comptime page_size: Pa
             gpa.free(self.dense);
         }
 
-        pub fn get(self: *const Self, idx: IndexT) *T {
-            const dense_idx = self.getDenseIdx(idx) orelse unreachable;
+        pub fn items(self: *const Self) []T {
+            return self.dense[0..self.len];
+        }
+
+        pub fn get(self: *const Self, idx: IndexT) ?*T {
+            const dense_idx = self.getDenseIdx(idx) orelse return null;
             return &self.dense[dense_idx];
         }
 
-        pub fn add(self: *Self, gpa: Allocator, idx: IndexT, item: T) Allocator.Error!void {
+        pub fn set(self: *Self, gpa: Allocator, idx: IndexT, item: T) Allocator.Error!void {
             if (self.dense.len <= self.len) {
                 try self.growDenseAndInverse(gpa, self.len + 1);
             }
@@ -189,10 +193,21 @@ test "SparseSet.add" {
     try TestSet.initCapacity(&set, testing.allocator, 32);
     defer set.deinit(testing.allocator);
 
-    try set.add(testing.allocator, 12, 3);
-    try set.add(testing.allocator, 3, 10);
+    try set.set(testing.allocator, 12, 3);
+    try set.set(testing.allocator, 3, 10);
 
     try testing.expectEqualSlices(u8, &.{ 3, 10 }, set.dense[0..set.len]);
+}
+
+test "SparseSet.get" {
+    var set: TestSet = undefined;
+    try TestSet.initCapacity(&set, testing.allocator, 32);
+    defer set.deinit(testing.allocator);
+
+    try set.set(testing.allocator, 12, 3);
+    try set.set(testing.allocator, 3, 10);
+
+    try testing.expectEqual(10, set.get(3).?.*);
 }
 
 test "SparseSet.remove" {
@@ -200,8 +215,8 @@ test "SparseSet.remove" {
     try TestSet.initCapacity(&set, testing.allocator, 32);
     defer set.deinit(testing.allocator);
 
-    try set.add(testing.allocator, 12, 3);
-    try set.add(testing.allocator, 3, 10);
+    try set.set(testing.allocator, 12, 3);
+    try set.set(testing.allocator, 3, 10);
 
     set.remove(12);
 

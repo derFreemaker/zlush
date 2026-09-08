@@ -35,42 +35,45 @@ pub fn StableList(comptime T: type, comptime IndexT: type) type {
             self.free_indexes.deinit(gpa);
         }
 
+        pub fn len(self: *const Self) usize {
+            return self.sparse.len;
+        }
+
+        pub fn items(self: *const Self) []T {
+            return self.sparse.items();
+        }
+
         pub fn get(self: *const Self, index: Index) *T {
-            return self.sparse.get(index.value());
+            return self.sparse.get(index.value()).?;
         }
 
         pub fn addOne(self: *Self, gpa: std.mem.Allocator) std.mem.Allocator.Error!Index {
-            const offset = self.dense.items.len;
-            _ = offset; // autofix
-            _ = try self.dense.addOne(gpa);
-            errdefer _ = self.dense.pop();
-
-            const index = self.free_indexes.pop() orelse blk: {
-                const index = Index.fromAny(self.sparse.items.len) catch return error.OutOfMemory;
-
+            const idx = self.free_indexes.pop() orelse blk: {
+                const index = Index.fromAny(self.sparse.len) catch return error.OutOfMemory;
+                try self.free_indexes.ensureTotalCapacity(self.sparse.len);
                 break :blk index;
             };
 
-            _ = try self.data.addOne(gpa);
-            errdefer _ = self.data.pop();
+            try self.sparse.set(gpa, idx.value(), undefined);
 
-            try self.free_indexes.ensureTotalCapacity(self.data.capacity);
-
-            return index;
+            return idx;
         }
 
         pub fn append(self: *Self, gpa: std.mem.Allocator, item: T) std.mem.Allocator.Error!Index {
-            const index = try self.addOne(gpa);
-            errdefer self.remove(index);
+            const idx = self.free_indexes.pop() orelse blk: {
+                const index = Index.fromAny(self.sparse.len) catch return error.OutOfMemory;
+                try self.free_indexes.ensureTotalCapacity(gpa, self.sparse.len);
+                break :blk index;
+            };
 
-            const ptr = self.get(index);
-            ptr.* = item;
+            try self.sparse.set(gpa, idx.value(), item);
 
-            return index;
+            return idx;
         }
 
-        pub fn remove(self: *Self, index: Index) void {
-            self.free_indexes.appendAssumeCapacity(index);
+        pub fn remove(self: *Self, idx: Index) void {
+            self.free_indexes.appendAssumeCapacity(idx);
+            self.sparse.remove(idx.value());
         }
     };
 }

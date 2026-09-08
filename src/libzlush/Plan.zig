@@ -1,17 +1,15 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const IndexT = @import("common/index.zig").IndexT;
 
 pub const NodeIdx = IndexT(Node, u16);
-
 pub const SourceIdx = IndexT(Source, u16);
 pub const SinkIdx = IndexT(Sink, u16);
-
 pub const EdgeIdx = IndexT(Edge, u16);
 pub const DepIdx = IndexT(Dependency, u16);
 
-// Plan
-const Pl = @This();
+const Plan = @This();
 
 nodes: []Node,
 
@@ -21,27 +19,41 @@ sinks: []Sink,
 edges: []Edge,
 dependencies: []Dependency,
 
-pub fn deinit(self: *Pl, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Plan, gpa: Allocator) void {
     for (self.nodes) |*node| {
-        node.deinit(allocator);
+        node.deinit(gpa);
     }
-    allocator.free(self.nodes);
+    gpa.free(self.nodes);
 
-    for (self.sources) |*source| {
-        source.deinit(allocator);
-    }
-    allocator.free(self.sources);
+    gpa.free(self.sources);
+    gpa.free(self.sinks);
 
-    for (self.sinks) |*sink| {
-        sink.deinit(allocator);
-    }
-    allocator.free(self.sinks);
+    gpa.free(self.edges);
+    gpa.free(self.dependencies);
+}
 
-    allocator.free(self.edges);
+pub fn getNode(self: *const Plan, idx: NodeIdx) *const Node {
+    return &self.nodes[idx.value()];
+}
+
+pub fn getSource(self: *const Plan, idx: SourceIdx) *const Source {
+    return &self.sources[idx.value()];
+}
+
+pub fn getSink(self: *const Plan, idx: SinkIdx) *const Sink {
+    return &self.sinks[idx.value()];
+}
+
+pub fn getEdge(self: *const Plan, idx: EdgeIdx) *const Edge {
+    return &self.edges[idx.value()];
+}
+
+pub fn getDependency(self: *const Plan, idx: DepIdx) *const Dependency {
+    return &self.dependencies[idx.value()];
 }
 
 pub const Node = struct {
-    data: Data,
+    interface: Interface,
 
     sources: []EdgeIdx,
     sinks: []EdgeIdx,
@@ -49,155 +61,115 @@ pub const Node = struct {
     dep_on: []DepIdx,
     dep_of: []DepIdx,
 
-    pub fn deinit(self: *Node, allocator: std.mem.Allocator) void {
-        self.data.deinit(allocator);
+    pub fn deinit(self: *Node, gpa: Allocator) void {
+        self.interface.deinit(gpa);
 
-        allocator.free(self.sources);
-        allocator.free(self.sinks);
+        gpa.free(self.sources);
+        gpa.free(self.sinks);
 
-        allocator.free(self.dep_on);
-        allocator.free(self.dep_of);
+        gpa.free(self.dep_on);
+        gpa.free(self.dep_of);
     }
 
-    pub const Data = union(enum) {
-        exec: Execution,
-        file: File,
+    pub const Interface = struct {
+        userdata: *anyopaque,
+        vtable: *const VTable,
 
-        pub fn deinit(self: *Data, allocator: std.mem.Allocator) void {
-            switch (self.*) {
-                .exec => self.exec.deinit(allocator),
-                .file => self.file.deinit(allocator),
-            }
+        pub const VTable = struct {
+            deinit: *const fn (userdata: *anyopaque, gpa: Allocator) void = noopDeinit,
+            clone: *const fn (userdata: *anyopaque, gpa: Allocator) Allocator.Error!*anyopaque = noopClone,
+
+            spawn: *const fn (userdata: *anyopaque, gpa: Allocator) Allocator.Error!*anyopaque = noopSpawn,
+            cleanup: *const fn (userdata: *anyopaque, instance: *anyopaque, gpa: Allocator) void = noopCleanup,
+
+            // TODO: pass sources and sinks
+            tick: *const fn (userdata: *anyopaque, instance: *anyopaque) Allocator.Error!TickResult,
+        };
+
+        pub fn noopDeinit(userdata: *anyopaque, gpa: Allocator) void {
+            _ = userdata;
+            _ = gpa;
         }
 
-        pub const Execution = struct {
-            args: []ArgSlot,
-            env: std.process.Environ.Map,
+        pub fn noopClone(userdata: *anyopaque, gpa: Allocator) Allocator.Error!*anyopaque {
+            _ = userdata;
+            _ = gpa;
+            return undefined;
+        }
 
-            pub fn deinit(self: *Execution, allocator: std.mem.Allocator) void {
-                for (self.args) |*arg| {
-                    arg.deinit(allocator);
-                }
-                allocator.free(self.args);
+        pub fn noopSpawn(userdata: *anyopaque, gpa: Allocator) Allocator.Error!*anyopaque {
+            _ = userdata;
+            _ = gpa;
+            return undefined;
+        }
 
-                self.env.deinit();
-            }
+        pub fn noopCleanup(userdata: *anyopaque, instance: *anyopaque, gpa: Allocator) void {
+            _ = userdata;
+            _ = instance;
+            _ = gpa;
+        }
 
-            pub const ArgSlot = union(enum) {
-                literal: []const u8,
-                captured: SinkIdx,
-                start_concat,
-                end_concat,
+        pub fn deinit(self: *const Interface, gpa: Allocator) void {
+            self.vtable.deinit(self.userdata, gpa);
+        }
 
-                pub fn deinit(self: *ArgSlot, allocator: std.mem.Allocator) void {
-                    switch (self.*) {
-                        .literal => |literal| allocator.free(literal),
-                        else => {},
-                    }
-                }
+        pub fn clone(self: *const Interface, gpa: Allocator) Allocator.Error!Interface {
+            const copy = Interface{
+                .userdata = try self.vtable.clone(self.userdata, gpa),
+                .vtable = self.vtable,
             };
-        };
+            return copy;
+        }
 
-        pub const File = struct {
-            path: []const u8,
+        pub fn spawn(self: *const Interface, gpa: Allocator) Allocator.Error!*anyopaque {
+            return self.vtable.spawn(self.userdata, gpa);
+        }
 
-            pub fn deinit(self: *File, allocator: std.mem.Allocator) void {
-                allocator.free(self.path);
-            }
-        };
+        pub fn cleanup(self: *const Interface, instance: *anyopaque, gpa: Allocator) void {
+            return self.vtable.cleanup(self.userdata, instance, gpa);
+        }
+
+        pub fn tick(self: *const Interface, instance: *anyopaque) Allocator.Error!TickResult {
+            return self.vtable.tick(self.userdata, instance);
+        }
+    };
+
+    pub const TickResult = union(enum) {
+        running,
+        exit: ExitCode,
+
+        pub const done = TickResult{ .exit = .done };
+        pub const failed = TickResult{ .exit = 1 };
+
+        pub fn fromCode(code: u8) TickResult {
+            return TickResult{ .exit = code };
+        }
+    };
+
+    pub const ExitCode = enum(u8) {
+        /// node successfully finished
+        done = 0,
+        /// node failed
+        _,
     };
 };
 
 pub const Source = struct {
     node: NodeIdx,
-    data: Data,
 
+    buf_capacity: u31,
+    buf_limit: u31,
     sinks_count: usize,
 
-    pub fn deinit(self: *Source, allocator: std.mem.Allocator) void {
-        self.data.deinit(allocator);
-    }
-
-    pub const Data = union(enum) {
-        exec: ExecutionOutput,
-        file: File,
-
-        pub fn deinit(self: *Data, allocator: std.mem.Allocator) void {
-            switch (self.*) {
-                .file => |file| {
-                    if (file.path) |path| {
-                        allocator.free(path);
-                    }
-                },
-                else => {},
-            }
-        }
-
-        pub const ExecutionOutput = enum {
-            stderr,
-            stdout,
-        };
-
-        pub const File = struct {
-            path: ?[]const u8 = null,
-        };
-    };
+    // TODO: provide option to write directly to a file / pipe
 };
 
 pub const Sink = struct {
     node: NodeIdx,
-    data: Data,
 
+    buf_capacity: u31,
+    buf_limit: u31,
     sources_count: usize,
-
-    pub fn deinit(self: *Sink, allocator: std.mem.Allocator) void {
-        self.data.deinit(allocator);
-    }
-
-    pub const Data = union(enum) {
-        exec: Execution,
-        file: File,
-
-        pub fn deinit(self: *Data, allocator: std.mem.Allocator) void {
-            switch (self.*) {
-                .file => |file| {
-                    if (file.path) |path| {
-                        allocator.free(path);
-                    }
-                },
-                else => {},
-            }
-        }
-
-        pub const Execution = struct {
-            role: Role,
-
-            pub const Role = union(enum) {
-                stdin,
-                arg: Arg,
-
-                pub const Arg = struct {
-                    idx: usize,
-                    trim: Trim = .trim_newlines,
-
-                    pub const Trim = enum {
-                        no_trim,
-                        trim_newlines,
-                    };
-                };
-            };
-        };
-
-        pub const File = struct {
-            path: ?[]const u8 = null,
-            mode: WriteMode = .append,
-
-            pub const WriteMode = enum {
-                append,
-                write_trunc,
-            };
-        };
-    };
 };
 
 pub const Edge = struct {
@@ -207,7 +179,7 @@ pub const Edge = struct {
 
 pub const Dependency = struct {
     node: NodeIdx,
-    dep: NodeIdx,
+    target: NodeIdx,
 
     wait_mode: WaitMode,
     kind: Kind,

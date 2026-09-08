@@ -20,7 +20,7 @@ pub fn IndexedPriorityDequeue(
         inverse_queue_map: []Index,
         free_indexes: []Index,
         len: IndexT,
-        cap: IndexT,
+        capacity: IndexT,
 
         context: Context,
 
@@ -30,7 +30,7 @@ pub fn IndexedPriorityDequeue(
             .inverse_queue_map = &.{},
             .free_indexes = &.{},
             .len = 0,
-            .cap = 0,
+            .capacity = 0,
 
             .context = undefined,
         };
@@ -51,11 +51,11 @@ pub fn IndexedPriorityDequeue(
             errdefer gpa.free(self.inverse_queue_map);
 
             self.free_indexes = try gpa.alloc(Index, capacity);
-            errdefer gpa.free(self.free_indexes[0..self.cap]);
+            errdefer gpa.free(self.free_indexes[0..self.capacity]);
             self.free_indexes.len = 0;
 
             self.len = 0;
-            self.cap = capacity;
+            self.capacity = capacity;
 
             self.context = context;
         }
@@ -64,7 +64,7 @@ pub fn IndexedPriorityDequeue(
             gpa.free(self.nodes);
             gpa.free(self.queue_map);
             gpa.free(self.inverse_queue_map);
-            gpa.free(self.free_indexes.ptr[0..self.cap]);
+            gpa.free(self.free_indexes.ptr[0..self.capacity]);
             self.len = 0;
         }
 
@@ -256,11 +256,11 @@ pub fn IndexedPriorityDequeue(
                     self.free_indexes = try gpa.alloc(Index, new_capacity);
                     self.free_indexes.len = old_free_indexes.len;
                     @memcpy(self.free_indexes, old_free_indexes);
-                    gpa.free(old_free_indexes.ptr[0..self.cap]);
+                    gpa.free(old_free_indexes.ptr[0..self.capacity]);
                 }
             }
 
-            self.cap = new_capacity;
+            self.capacity = new_capacity;
         }
 
         pub fn ensureUnusedCapacity(self: *Self, gpa: Allocator, additional_count: IndexT) Allocator.Error!void {

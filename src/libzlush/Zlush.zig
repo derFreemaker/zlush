@@ -1,16 +1,17 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
-const Ctx = @import("Ctx.zig");
+const PlB = @import("builder/PlanBuilder.zig");
 
 const Zlush = @This();
 
-allocator: std.mem.Allocator,
+allocator: Allocator,
 
 config: Config,
 
 env_map: std.process.Environ.Map,
 
-pub fn init(allocator: std.mem.Allocator, env_map_: ?*const std.process.Environ.Map, config: Config) std.mem.Allocator.Error!Zlush {
+pub fn init(allocator: Allocator, env_map_: ?*const std.process.Environ.Map, config: Config) Allocator.Error!Zlush {
     var env_map = if (env_map_) |env_map|
         try env_map.clone(allocator)
     else
@@ -30,11 +31,12 @@ pub fn deinit(self: *Zlush) void {
     self.env_map.deinit();
 }
 
-pub fn context(self: *Zlush, allocator: std.mem.Allocator) std.mem.Allocator.Error!Ctx {
-    var ctx = try Ctx.init(allocator, &self.config);
-    errdefer ctx.deinit();
+pub fn builder(self: *Zlush, gpa: Allocator) Allocator.Error!PlB {
+    var b: PlB = undefined;
+    try PlB.init(&b, gpa, &self.config);
+    errdefer b.deinit();
 
-    return ctx;
+    return b;
 }
 
 pub const Config = struct {

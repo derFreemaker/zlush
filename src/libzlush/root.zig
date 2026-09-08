@@ -1,17 +1,18 @@
 const std = @import("std");
 
-// pub const PlanResolver = @import("PlanResolver.zig");
-// pub const Zlush = @import("Zlush.zig");
+pub const Zlush = @import("Zlush.zig");
 
 test {
+    _ = @import("builder/PlanBuilder.zig");
+
+    _ = @import("common/CircBuffer.zig");
     _ = @import("common/IndexedPriorityDequeue.zig");
     _ = @import("common/MultiReaderCircBuffer.zig");
     _ = @import("common/SparseSet.zig");
     _ = @import("common/StableList.zig");
 
     // _ = @import("Tokenizer.zig");
-
-    // _ = @import("Ctx.zig");
+    _ = @import("Engine.zig");
 
     @setEvalBranchQuota(1_000_000);
     refAllDeclsRecursive(@This());
