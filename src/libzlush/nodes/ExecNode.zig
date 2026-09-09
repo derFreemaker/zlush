@@ -37,7 +37,7 @@ pub fn init(gpa: Allocator, args: []const []const u8, env_map: ?*const std.proce
     return self;
 }
 
-pub fn node(self: *ExecNode) Pl.Node.Interface {
+pub fn asNode(self: *ExecNode) Pl.Node.Interface {
     return Pl.Node.Interface{
         .userdata = self,
         .vtable = &.{
@@ -113,14 +113,15 @@ fn spawn(userdata: *anyopaque, gpa: Allocator) Allocator.Error!*anyopaque {
 }
 
 fn cleanup(userdata: *anyopaque, instance: *anyopaque, gpa: Allocator) void {
-    _ = instance; // autofix
     _ = userdata; // autofix
+    _ = instance; // autofix
     _ = gpa; // autofix
 }
 
-fn tick(userdata: *anyopaque, instance: *anyopaque) Allocator.Error!Pl.Node.TickResult {
+fn tick(userdata: *anyopaque, instance: *anyopaque, ctx: *Pl.EngineContext) Allocator.Error!Pl.Node.TickResult {
     _ = userdata; // autofix
     _ = instance; // autofix
+    _ = ctx; // autofix
     return .done;
 }
 

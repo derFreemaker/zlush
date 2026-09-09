@@ -79,7 +79,7 @@ pub fn dependsOn(self: *const PlanBuilder, a: NodeIdx, b: NodeIdx) bool {
     }
 
     const node = self.nodes.get(a);
-    for (node.dep_on.sparse.items()) |dep_idx| {
+    for (node.dep_on.items()) |dep_idx| {
         const dep = self.dependencies.get(dep_idx);
         if (dep.target == b) {
             return true;
@@ -97,19 +97,21 @@ pub const DependOnError = Allocator.Error || error{
     CircleDependency,
 };
 
-pub fn dependOn(self: *PlanBuilder, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Dependency.WaitMode) DependOnError!DependencyResult {
-    return self.dependOnImpl(a, b, wait_mode, .explicit);
+/// returns a struct with the nessecarry information to undo the dependency
+pub fn dependOn(self: *PlanBuilder, node_idx: NodeIdx, target_idx: NodeIdx, wait_mode: Pl.Dependency.WaitMode) DependOnError!DependencyResult {
+    return self.dependOnImpl(node_idx, target_idx, wait_mode, .explicit);
 }
 
-fn dependOnImpl(self: *PlanBuilder, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Dependency.WaitMode, kind: Pl.Dependency.Kind) DependOnError!DependencyResult {
-    if (self.dependsOn(b, a)) {
+/// returns a struct with the nessecarry information to undo the dependency
+fn dependOnImpl(self: *PlanBuilder, node_idx: NodeIdx, target_idx: NodeIdx, wait_mode: Pl.Dependency.WaitMode, kind: Pl.Dependency.Kind) DependOnError!DependencyResult {
+    if (self.dependsOn(target_idx, node_idx)) {
         return DependOnError.CircleDependency;
     }
 
-    const node = self.nodes.get(a);
-    for (node.dep_on.sparse.items()) |dep_idx| {
+    const node = self.nodes.get(node_idx);
+    for (node.dep_on.items()) |dep_idx| {
         const dep = self.dependencies.get(dep_idx);
-        if (dep.target == b) {
+        if (dep.target == target_idx) {
             const result = DependencyResult{
                 .idx = dep_idx,
                 .node_idx = dep.node,
@@ -132,8 +134,8 @@ fn dependOnImpl(self: *PlanBuilder, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Depend
     }
 
     const dep_idx = try self.dependencies.append(self.gpa, Dependency{
-        .node = a,
-        .target = b,
+        .node = node_idx,
+        .target = target_idx,
 
         .wait_mode = wait_mode,
         .kind = kind,
@@ -143,7 +145,7 @@ fn dependOnImpl(self: *PlanBuilder, a: NodeIdx, b: NodeIdx, wait_mode: Pl.Depend
     const node_dep_idx = try node.dep_on.append(self.gpa, dep_idx);
     errdefer _ = node.dep_on.remove(node_dep_idx);
 
-    const target_node = self.nodes.get(b);
+    const target_node = self.nodes.get(target_idx);
     const target_dep_idx = try target_node.dep_of.append(self.gpa, dep_idx);
     errdefer _ = target_node.dep_of.remove(target_dep_idx);
 
@@ -170,7 +172,7 @@ const DependencyResult = struct {
             self.previous_kind == null;
     }
 
-    pub fn deinit(self: DependencyResult, builder: *PlanBuilder) void {
+    pub fn undo(self: DependencyResult, builder: *PlanBuilder) void {
         const dep = builder.dependencies.get(self.idx);
 
         if (self.gotAdded()) {
@@ -210,6 +212,7 @@ pub fn removeSink(self: *PlanBuilder, sink_idx: SinkIdx) void {
     self.sinks.remove(sink_idx);
 }
 
+/// returns a struct with the nessecarry information to undo the edge
 fn addEdge(self: *PlanBuilder, source_idx: SourceIdx, sink_idx: SinkIdx) Allocator.Error!EdgeResult {
     const idx = try self.edges.append(self.gpa, Edge{
         .source = source_idx,
@@ -253,7 +256,7 @@ pub const EdgeResult = struct {
     node_source_idx: NodeSourceIdx,
     node_sink_idx: NodeSinkIdx,
 
-    pub fn deinit(self: *const EdgeResult, builder: *PlanBuilder) void {
+    pub fn undo(self: *const EdgeResult, builder: *PlanBuilder) void {
         builder.edges.remove(self.idx);
 
         const source = builder.sources.get(self.source_idx);
@@ -267,6 +270,31 @@ pub const EdgeResult = struct {
         sink_node.sources.remove(self.node_sink_idx);
     }
 };
+
+pub const PipeError = Allocator.Error || PlanBuilder.DependOnError;
+
+pub fn pipe(self: *PlanBuilder, source_idx: SourceIdx, sink_idx: SinkIdx) PipeError!void {
+    const source = self.sources.get(source_idx);
+    const sink = self.sinks.get(sink_idx);
+
+    const dep = try self.dependOnImpl(sink.node, source.node, .started, .implicit);
+    errdefer dep.undo(self);
+
+    const edge_result = try self.addEdge(source_idx, sink_idx);
+    errdefer edge_result.undo(self);
+}
+
+pub const ExecCreationError = Allocator.Error || error{
+    NoArgProvided,
+};
+
+pub fn exec(self: *PlanBuilder, args: []const []const u8, env_map: ?*const std.process.Environ.Map) ExecCreationError!ExecBuilder {
+    if (args.len == 0) {
+        return ExecCreationError.NoArgProvided;
+    }
+
+    return try ExecBuilder.init(self, args, env_map);
+}
 
 // pub fn registerFile(self: *PlanBuilder, path: []const u8) Allocator.Error!FileIdx {
 //     const copy = try self.gpa.dupe(u8, path);
@@ -284,17 +312,32 @@ pub const EdgeResult = struct {
 //     };
 // }
 
-pub const ExecCreationError = Allocator.Error || error{
-    NoArgProvided,
-};
+// pub fn pipeFile(self: *const ExecBuilder, output: Plan.Edge.SourceData.Execution.Output, sink: FileIdx, config: PipeFileConfig) PipeError!void {
+//     const ctx = self.ctx;
 
-pub fn exec(self: *PlanBuilder, args: []const []const u8, env_map: ?*const std.process.Environ.Map) ExecCreationError!ExecBuilder {
-    if (args.len == 0) {
-        return ExecCreationError.NoArgProvided;
-    }
+//     const dep = try ctx.dependOn(sink.idx, self.node, .started, .implicit);
+//     errdefer dep.deinit(ctx);
 
-    return try ExecBuilder.init(self, args, env_map);
-}
+//     const edge_result = try ctx.addEdge(
+//         SourceKey{
+//             .node = self.node,
+//             .data = .{ .exec = output },
+//         },
+//         SinkKey{
+//             .node = sink.idx,
+//             .data = .{ .file = .{
+//                 .mode = config.mode,
+//                 .path = config.path,
+//             } },
+//         },
+//     );
+//     errdefer edge_result.deinit(ctx);
+// }
+
+// pub const PipeFileConfig = struct {
+//     mode: Plan.Edge.TargetData.File.WriteMode = .append,
+//     path: ?[]const u8 = null,
+// };
 
 pub fn plan(self: *const PlanBuilder, gpa: Allocator) Allocator.Error!Pl {
     var node_i: usize = 0;
@@ -392,46 +435,6 @@ pub fn plan(self: *const PlanBuilder, gpa: Allocator) Allocator.Error!Pl {
     };
 }
 
-pub const PipeError = Allocator.Error || PlanBuilder.DependOnError;
-
-pub fn pipe(self: *PlanBuilder, source_idx: SourceIdx, sink_idx: SinkIdx) PipeError!void {
-    const source = self.sources.get(source_idx);
-    const sink = self.sinks.get(sink_idx);
-
-    const dep = try self.dependOnImpl(sink.node, source.node, .started, .implicit);
-    errdefer dep.deinit(self);
-
-    const edge_result = try self.addEdge(source_idx, sink_idx);
-    errdefer edge_result.deinit(self);
-}
-
-// pub fn pipeFile(self: *const ExecBuilder, output: Plan.Edge.SourceData.Execution.Output, sink: FileIdx, config: PipeFileConfig) PipeError!void {
-//     const ctx = self.ctx;
-
-//     const dep = try ctx.dependOn(sink.idx, self.node, .started, .implicit);
-//     errdefer dep.deinit(ctx);
-
-//     const edge_result = try ctx.addEdge(
-//         SourceKey{
-//             .node = self.node,
-//             .data = .{ .exec = output },
-//         },
-//         SinkKey{
-//             .node = sink.idx,
-//             .data = .{ .file = .{
-//                 .mode = config.mode,
-//                 .path = config.path,
-//             } },
-//         },
-//     );
-//     errdefer edge_result.deinit(ctx);
-// }
-
-// pub const PipeFileConfig = struct {
-//     mode: Plan.Edge.TargetData.File.WriteMode = .append,
-//     path: ?[]const u8 = null,
-// };
-
 pub const FileIdx = struct {
     idx: NodeIdx,
 
@@ -498,7 +501,7 @@ pub const Source = struct {
     // TODO: set capacity equal to the per platform pipe limit by default (4K is the default for Linux)
     buf_capacity: u31 = 4 * 1024,
     buf_limit: u31 = 4 * 1024,
-    sinks_count: usize = 0,
+    sinks_count: u8 = 0,
 };
 
 pub const Sink = struct {
@@ -507,7 +510,7 @@ pub const Sink = struct {
     // TODO: set capacity equal to the per platform pipe limit by default (4K is the default for Linux)
     buf_capacity: u31 = 4 * 1024,
     buf_limit: u31 = 4 * 1024,
-    sources_count: usize = 0,
+    sources_count: u8 = 0,
 };
 
 pub const Edge = struct {

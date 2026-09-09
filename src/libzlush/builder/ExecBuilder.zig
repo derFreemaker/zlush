@@ -12,10 +12,10 @@ node: PlB.NodeIdx,
 
 pub fn init(plan: *PlB, args: []const []const u8, env_map: ?*const std.process.Environ.Map) Allocator.Error!ExecBuilder {
     const exec_node = try ExecNode.init(plan.gpa, args, env_map);
-    errdefer exec_node.node().deinit(plan.gpa);
+    errdefer exec_node.asNode().deinit(plan.gpa);
 
     const idx = try plan.nodes.append(plan.gpa, PlB.Node{
-        .interface = exec_node.node(),
+        .interface = exec_node.asNode(),
     });
     errdefer plan.nodes.remove(idx);
 

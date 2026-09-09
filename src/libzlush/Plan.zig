@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const IndexT = @import("common/index.zig").IndexT;
+const Engine = @import("Engine.zig");
+pub const EngineContext = Engine.Context;
 
 pub const NodeIdx = IndexT(Node, u16);
 pub const SourceIdx = IndexT(Source, u16);
@@ -83,7 +85,7 @@ pub const Node = struct {
             cleanup: *const fn (userdata: *anyopaque, instance: *anyopaque, gpa: Allocator) void = noopCleanup,
 
             // TODO: pass sources and sinks
-            tick: *const fn (userdata: *anyopaque, instance: *anyopaque) Allocator.Error!TickResult,
+            tick: *const fn (userdata: *anyopaque, instance: *anyopaque, ctx: *EngineContext) Allocator.Error!TickResult,
         };
 
         pub fn noopDeinit(userdata: *anyopaque, gpa: Allocator) void {
@@ -129,8 +131,8 @@ pub const Node = struct {
             return self.vtable.cleanup(self.userdata, instance, gpa);
         }
 
-        pub fn tick(self: *const Interface, instance: *anyopaque) Allocator.Error!TickResult {
-            return self.vtable.tick(self.userdata, instance);
+        pub fn tick(self: *const Interface, instance: *anyopaque, ctx: *EngineContext) Allocator.Error!TickResult {
+            return self.vtable.tick(self.userdata, instance, ctx);
         }
     };
 
@@ -159,7 +161,7 @@ pub const Source = struct {
 
     buf_capacity: u31,
     buf_limit: u31,
-    sinks_count: usize,
+    sinks_count: u8,
 
     // TODO: provide option to write directly to a file / pipe
 };
@@ -169,7 +171,7 @@ pub const Sink = struct {
 
     buf_capacity: u31,
     buf_limit: u31,
-    sources_count: usize,
+    sources_count: u8,
 };
 
 pub const Edge = struct {

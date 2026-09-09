@@ -72,7 +72,7 @@ pub fn SparseSet(comptime T: type, comptime IndexT: type, comptime page_size: Pa
             return &self.dense[dense_idx];
         }
 
-        pub fn set(self: *Self, gpa: Allocator, idx: IndexT, item: T) Allocator.Error!void {
+        pub fn add(self: *Self, gpa: Allocator, idx: IndexT) Allocator.Error!*T {
             if (self.dense.len <= self.len) {
                 try self.growDenseAndInverse(gpa, self.len + 1);
             }
@@ -81,7 +81,6 @@ pub fn SparseSet(comptime T: type, comptime IndexT: type, comptime page_size: Pa
             self.len += 1;
             errdefer self.len -= 1;
 
-            self.dense[dense_idx] = item;
             self.inverse[dense_idx] = idx;
 
             const page_idx = pageIndex(idx);
@@ -96,6 +95,13 @@ pub fn SparseSet(comptime T: type, comptime IndexT: type, comptime page_size: Pa
 
             const sparse_slot = self.getSparseSlot(idx);
             sparse_slot.* = dense_idx;
+
+            return &self.dense[dense_idx];
+        }
+
+        pub fn set(self: *Self, gpa: Allocator, idx: IndexT, item: T) Allocator.Error!void {
+            const item_ptr = try self.add(gpa, idx);
+            item_ptr.* = item;
         }
 
         pub fn remove(self: *Self, idx: IndexT) void {
