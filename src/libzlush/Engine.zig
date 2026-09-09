@@ -113,12 +113,14 @@ fn spawnNode(self: *Engine, node_idx: NodeIdx) Allocator.Error!void {
             .incomplete_write = null,
         });
 
-        const pl_sink = self.plan.getSink(sink_idx);
+        if (self.sinks.get(sink_idx.value()) == null) {
+            const pl_sink = self.plan.getSink(sink_idx);
 
-        var sink: Sink = undefined;
-        try Sink.init(&sink, self.gpa, sink_idx, pl_sink.buf_capacity, pl_sink.buf_limit);
-        errdefer sink.deinit(self.gpa);
-        try self.sinks.set(self.gpa, sink_idx.value(), sink);
+            var sink: Sink = undefined;
+            try Sink.init(&sink, self.gpa, sink_idx, pl_sink.buf_capacity, pl_sink.buf_limit);
+            errdefer sink.deinit(self.gpa);
+            try self.sinks.set(self.gpa, sink_idx.value(), sink);
+        }
     }
 
     node.instance = try node.interface.spawn(self.gpa);
