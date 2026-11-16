@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const builtin = @import("builtin");
 
-const IndexedPriorityDequeue = @import("IndexedPriorityDequeue.zig").IndexedPriorityDequeue;
+const IndexedPriorityQueue = @import("IndexedPriorityQueue.zig").IndexedPriorityQueue;
 const CircBuffer = @import("CircBuffer.zig").CircBuffer;
 
 /// @Rework
@@ -13,7 +13,7 @@ pub fn MultiReaderCircBuffer(comptime T: type) type {
             _ = ctx;
             return a < b;
         }
-        const ReadersQueue = IndexedPriorityDequeue(u32, u8, void, lessThanInteger);
+        const ReadersQueue = IndexedPriorityQueue(u32, u8, void, lessThanInteger);
         pub const ReaderIdx = ReadersQueue.Index;
 
         const Self = @This();

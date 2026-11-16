@@ -4,7 +4,7 @@ const testing = std.testing;
 
 const Indexes = @import("index.zig");
 
-pub fn IndexedPriorityDequeue(
+pub fn IndexedPriorityQueue(
     comptime T: type,
     comptime IndexT: type,
     comptime Context: type,
@@ -275,7 +275,7 @@ fn lessThanInteger(ctx: void, a: u32, b: u32) bool {
 }
 
 test "push" {
-    var pq: IndexedPriorityDequeue(u32, u32, void, lessThanInteger) = .empty;
+    var pq: IndexedPriorityQueue(u32, u32, void, lessThanInteger) = .empty;
     defer pq.deinit(testing.allocator);
 
     _ = try pq.push(testing.allocator, 12);
@@ -289,7 +289,7 @@ test "push" {
 }
 
 test "remove" {
-    var pq: IndexedPriorityDequeue(u32, u32, void, lessThanInteger) = .empty;
+    var pq: IndexedPriorityQueue(u32, u32, void, lessThanInteger) = .empty;
     defer pq.deinit(testing.allocator);
 
     _ = try pq.push(testing.allocator, 12);
@@ -304,7 +304,7 @@ test "remove" {
 }
 
 test "update" {
-    var pq: IndexedPriorityDequeue(u32, u32, void, lessThanInteger) = .empty;
+    var pq: IndexedPriorityQueue(u32, u32, void, lessThanInteger) = .empty;
     defer pq.deinit(testing.allocator);
 
     _ = try pq.push(testing.allocator, 5);

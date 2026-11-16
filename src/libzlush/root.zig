@@ -6,7 +6,7 @@ test {
     _ = @import("builder/PlanBuilder.zig");
 
     _ = @import("common/CircBuffer.zig");
-    _ = @import("common/IndexedPriorityDequeue.zig");
+    _ = @import("common/IndexedPriorityQueue.zig");
     _ = @import("common/MultiReaderCircBuffer.zig");
     _ = @import("common/SparseSet.zig");
     _ = @import("common/StableList.zig");
